@@ -1,0 +1,21 @@
+{
+  "manifest_version": 3,
+  "name": "Klippa Video Tracker",
+  "version": "1.0.0",
+  "description": "Detects which video is currently playing and reports it to the Klippa note-taking app.",
+  "permissions": [],
+  "host_permissions": [
+    "http://127.0.0.1:8765/*"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "content_scripts": [
+    {
+      "matches": ["<all_urls>"],
+      "js": ["content.js"],
+      "run_at": "document_idle"
+    }
+  ],
+  "icons": {}
+}

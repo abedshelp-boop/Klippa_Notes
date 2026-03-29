@@ -1,0 +1,11 @@
+fastapi
+uvicorn[standard]
+websockets
+aiosqlite
+openai
+python-dotenv
+numpy
+scipy
+soundfile
+openwakeword
+pyaudiowpatch
