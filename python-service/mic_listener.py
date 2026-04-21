@@ -1,3 +1,5 @@
+from collections import deque
+
 import numpy as np
 import pyaudiowpatch as pyaudio
 
@@ -6,11 +8,10 @@ from config import (
     SILENCE_THRESHOLD,
     SILENCE_DURATION_SEC,
     MAX_COMMAND_SEC,
+    NO_SPEECH_TIMEOUT_SEC,
 )
 
 _p = pyaudio.PyAudio()
-
-GRACE_PERIOD_SEC = 1.0
 
 
 def _find_default_mic():
@@ -26,12 +27,15 @@ def _find_default_mic():
         raise RuntimeError("No microphone found")
 
 
-def record_command() -> np.ndarray:
+def record_command() -> np.ndarray | None:
     """Record from the microphone until the user stops speaking.
 
-    Stops when silence (RMS below SILENCE_THRESHOLD) persists for
-    SILENCE_DURATION_SEC after speech has been detected, or when
-    MAX_COMMAND_SEC is reached.
+    Behavior:
+      - Listens for up to NO_SPEECH_TIMEOUT_SEC for the user to start talking.
+        If nothing is heard in that window, returns None to signal "user said
+        nothing — abort the whole note instead of capturing dead air".
+      - Once speech starts, keeps recording until SILENCE_DURATION_SEC of
+        quiet, or until MAX_COMMAND_SEC is reached.
     """
     mic = _find_default_mic()
     mic_rate = int(mic["defaultSampleRate"])
@@ -49,12 +53,31 @@ def record_command() -> np.ndarray:
 
     sec_per_chunk = chunk_size / mic_rate
     silence_chunks_needed = int(SILENCE_DURATION_SEC / sec_per_chunk)
-    grace_chunks = int(GRACE_PERIOD_SEC / sec_per_chunk)
+    no_speech_timeout_chunks = int(NO_SPEECH_TIMEOUT_SEC / sec_per_chunk)
     max_chunks = int(MAX_COMMAND_SEC / sec_per_chunk)
+    # Calibrate ambient noise over ~400ms. Longer than before (was 250ms) so
+    # the baseline is more stable — short calibration windows can latch onto
+    # a random mic burst or the tail of "Hey Deen" still decaying in the room.
+    calibration_chunks = max(1, int(0.4 / sec_per_chunk))
+    # Smooth the per-chunk RMS over ~200ms. At 48 kHz + 1024-sample chunks,
+    # a single chunk is only ~21 ms — short enough that a single inter-word
+    # gap between a stop consonant ("t") and the next vowel reads as silent,
+    # which was the visible bug: the listener was cutting people off mid-
+    # sentence. Smoothing over ~10 chunks rides through phoneme-scale gaps
+    # and only fires "silent" on real end-of-utterance pauses.
+    rms_window_size = max(1, int(0.2 / sec_per_chunk))
+    rms_window: deque[float] = deque(maxlen=rms_window_size)
 
     silent_chunks = 0
     speech_started = False
     chunks_read = 0
+    calibration_rms: list[float] = []
+    start_threshold = SILENCE_THRESHOLD
+    # Hysteresis: once speech starts, the bar for "still speaking" drops to
+    # 40% of the start threshold. Prevents natural mid-sentence dips from
+    # re-registering as silence. A real end-of-command silence drops almost
+    # to the ambient floor, well below 0.4× the start threshold.
+    continue_threshold = SILENCE_THRESHOLD
 
     try:
         while chunks_read < max_chunks:
@@ -63,26 +86,57 @@ def record_command() -> np.ndarray:
             frames.append(chunk)
             chunks_read += 1
 
-            rms = np.sqrt(np.mean(chunk ** 2))
+            rms = float(np.sqrt(np.mean(chunk ** 2)))
+            rms_window.append(rms)
+            smoothed_rms = float(np.mean(rms_window))
 
-            if rms > SILENCE_THRESHOLD:
-                speech_started = True
+            # Calibration phase: learn the noise floor before classifying.
+            if chunks_read <= calibration_chunks:
+                calibration_rms.append(rms)
+                if chunks_read == calibration_chunks:
+                    ambient = float(np.mean(calibration_rms))
+                    # ambient * 2.0 is less aggressive than the old ambient * 3.0
+                    # — normal speech RMS on a laptop mic sits around 0.01-0.03
+                    # and the prior 3× multiplier on a slightly-noisy ambient
+                    # reading would push the start threshold above the user's
+                    # actual speech level.
+                    start_threshold = max(SILENCE_THRESHOLD, ambient * 2.0)
+                    continue_threshold = max(SILENCE_THRESHOLD * 0.5,
+                                             start_threshold * 0.4)
+                    print(f"[Mic] Ambient={ambient:.5f}, "
+                          f"start={start_threshold:.5f}, "
+                          f"continue={continue_threshold:.5f}")
+                continue
+
+            # Choose threshold based on whether speech has already started —
+            # this is the hysteresis step. Before speech: strict. During
+            # speech: permissive, so mid-word dips don't count as silence.
+            active_threshold = continue_threshold if speech_started else start_threshold
+
+            if smoothed_rms > active_threshold:
+                if not speech_started:
+                    speech_started = True
+                    print(f"[Mic] Speech detected at {chunks_read * sec_per_chunk:.1f}s.")
                 silent_chunks = 0
             else:
                 silent_chunks += 1
 
+            # Stop case 1: speech happened, then went quiet for SILENCE_DURATION_SEC.
             if speech_started and silent_chunks >= silence_chunks_needed:
-                print(f"[Mic] Silence detected after {chunks_read * sec_per_chunk:.1f}s, stopping.")
+                print(f"[Mic] {SILENCE_DURATION_SEC:.0f}s of silence after "
+                      f"{chunks_read * sec_per_chunk:.1f}s, stopping.")
                 break
 
-            if not speech_started and chunks_read > grace_chunks:
-                silent_chunks = 0
+            # Stop case 2: nothing was ever said. Abort the whole note.
+            if not speech_started and chunks_read >= no_speech_timeout_chunks:
+                print(f"[Mic] No speech in {NO_SPEECH_TIMEOUT_SEC:.0f}s — aborting note.")
+                return None
     finally:
         stream.stop_stream()
         stream.close()
 
     if not frames:
-        return np.array([], dtype=np.float32)
+        return None
 
     audio = np.concatenate(frames)
 

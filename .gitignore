@@ -10,3 +10,10 @@ pending/
 *.wav
 *.mp3
 *.egg-info/
+
+# Local Claude Code session/permission state — per-machine, not shareable.
+.claude/
+
+# Wake-word Picovoice bundle downloads. The extracted .ppn is committed
+# under python-service/models/ — the zip itself is redundant.
+*.zip

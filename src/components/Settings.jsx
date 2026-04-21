@@ -1,11 +1,13 @@
-import React, { useState, useEffect } from 'react';
+import React, { useEffect, useState } from 'react';
 
 const API_URL = 'http://localhost:8765';
 
 export default function Settings({ onClose }) {
   const [openaiKey, setOpenaiKey] = useState('');
-  const [bufferLength, setBufferLength] = useState(120);
-  const [arabizeEnabled, setArabizeEnabled] = useState(true);
+  const [assemblyaiKey, setAssemblyaiKey] = useState('');
+  const [hasOpenaiKey, setHasOpenaiKey] = useState(false);
+  const [hasAssemblyaiKey, setHasAssemblyaiKey] = useState(false);
+  const [bufferLength, setBufferLength] = useState(600);
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
@@ -13,10 +15,17 @@ export default function Settings({ onClose }) {
       .then((r) => r.json())
       .then((data) => {
         if (data.buffer_length) setBufferLength(data.buffer_length);
-        if (data.arabize_enabled !== undefined) setArabizeEnabled(data.arabize_enabled);
+        setHasOpenaiKey(!!data.has_openai_key);
+        setHasAssemblyaiKey(!!data.has_assemblyai_key);
       })
       .catch(() => {});
   }, []);
+
+  useEffect(() => {
+    const onKey = (e) => { if (e.key === 'Escape') onClose(); };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [onClose]);
 
   const handleSave = async () => {
     setSaving(true);
@@ -26,8 +35,8 @@ export default function Settings({ onClose }) {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           openai_api_key: openaiKey || undefined,
+          assemblyai_api_key: assemblyaiKey || undefined,
           buffer_length: bufferLength,
-          arabize_enabled: arabizeEnabled,
         }),
       });
       onClose();
@@ -39,19 +48,44 @@ export default function Settings({ onClose }) {
   };
 
   return (
-    <div className="settings-overlay" onClick={(e) => e.target === e.currentTarget && onClose()}>
+    <div
+      className="settings-overlay"
+      onClick={(e) => e.target === e.currentTarget && onClose()}
+    >
       <div className="settings-panel">
-        <div className="settings-title">Settings</div>
+        <div className="settings-eyebrow">DEEN · SETTINGS</div>
+        <div className="settings-title">Preferences</div>
 
         <div className="settings-group">
-          <label className="settings-label">OpenAI API Key</label>
+          <label className="settings-label">
+            AssemblyAI API Key {hasAssemblyaiKey && <span style={{ opacity: 0.5 }}>· set</span>}
+          </label>
           <input
             className="settings-input"
             type="password"
-            placeholder="sk-..."
+            placeholder={hasAssemblyaiKey ? 'leave blank to keep existing key' : 'your AssemblyAI key'}
+            value={assemblyaiKey}
+            onChange={(e) => setAssemblyaiKey(e.target.value)}
+          />
+          <div className="settings-hint" style={{ fontSize: 12, opacity: 0.6, marginTop: 4 }}>
+            Primary transcription engine (Universal-3 Pro with Islamic keyterms).
+          </div>
+        </div>
+
+        <div className="settings-group">
+          <label className="settings-label">
+            OpenAI API Key {hasOpenaiKey && <span style={{ opacity: 0.5 }}>· set</span>}
+          </label>
+          <input
+            className="settings-input"
+            type="password"
+            placeholder={hasOpenaiKey ? 'leave blank to keep existing key' : 'sk-...'}
             value={openaiKey}
             onChange={(e) => setOpenaiKey(e.target.value)}
           />
+          <div className="settings-hint" style={{ fontSize: 12, opacity: 0.6, marginTop: 4 }}>
+            Used for note generation (GPT-4o-mini) and transcription fallback.
+          </div>
         </div>
 
         <div className="settings-group">
@@ -59,27 +93,11 @@ export default function Settings({ onClose }) {
           <input
             className="settings-input"
             type="number"
-            min={30}
-            max={300}
+            min={60}
+            max={1800}
             value={bufferLength}
             onChange={(e) => setBufferLength(Number(e.target.value))}
           />
-        </div>
-
-        <div className="settings-group">
-          <label className="settings-label">Arabic Script Conversion</label>
-          <div className="settings-toggle-row">
-            <button
-              className={`settings-toggle ${arabizeEnabled ? 'active' : ''}`}
-              onClick={() => setArabizeEnabled(!arabizeEnabled)}
-              type="button"
-            >
-              <span className="settings-toggle-knob" />
-            </button>
-            <span className="settings-toggle-description">
-              Convert transliterated Arabic words to Arabic script
-            </span>
-          </div>
         </div>
 
         <div className="settings-actions">

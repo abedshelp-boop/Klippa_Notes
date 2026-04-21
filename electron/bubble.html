@@ -3,235 +3,525 @@
 <head>
 <meta charset="UTF-8" />
 <style>
+  :root {
+    --size: 160px;                           /* visible bubble diameter */
+    --window: 320px;                         /* Electron window size — keep in sync with BUBBLE_WINDOW in main.js */
+    --body: calc(var(--size) * 0.52);        /* sphere diameter */
+    --halo-near: calc(var(--body) + 28px);
+    --halo-far:  calc(var(--body) + 80px);
+    --wave:      calc(var(--body) + 20px);
+    --bob:       calc(var(--size) * -0.025); /* bob amplitude */
+  }
+
   * { margin: 0; padding: 0; box-sizing: border-box; }
 
   html, body {
-    width: 80px;
-    height: 80px;
+    width: var(--window);
+    height: var(--window);
     overflow: hidden;
     background: transparent;
     user-select: none;
+    -webkit-font-smoothing: antialiased;
   }
-
-  .bubble-container {
-    width: 80px;
-    height: 80px;
+  /* Center the visible bubble inside the oversized transparent window. The
+     extra padding gives pulse halos room to fade past the visible sphere
+     without hitting the window edge (which would clip into a square). */
+  body {
     display: flex;
     align-items: center;
     justify-content: center;
-    position: relative;
   }
 
-  /* ---- Core bubble circle ---- */
-  .bubble {
-    width: 48px;
-    height: 48px;
-    border-radius: 50%;
-    background: #6c8cff;
+  #stage {
+    width: var(--size);
+    height: var(--size);
     position: relative;
-    z-index: 2;
+    perspective: 900px;
+    animation: bob 5s ease-in-out infinite;
     cursor: pointer;
-    transition: transform 0.4s cubic-bezier(0.34, 1.56, 0.64, 1),
-                background 0.4s ease,
-                box-shadow 0.4s ease;
-    box-shadow: 0 0 14px rgba(108, 140, 255, 0.35),
-                0 0 4px rgba(108, 140, 255, 0.2);
   }
-
-  /* Klippa "K" letter */
-  .bubble::after {
-    content: 'K';
-    position: absolute;
-    inset: 0;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
-    font-size: 20px;
-    font-weight: 700;
-    color: rgba(255, 255, 255, 0.9);
-    transition: opacity 0.3s ease;
-  }
-
-  /* ---- Outer ring (used for processing spinner) ---- */
-  .ring {
-    position: absolute;
-    width: 64px;
-    height: 64px;
-    border-radius: 50%;
-    border: 2.5px solid transparent;
-    z-index: 1;
-    transition: border-color 0.4s ease, opacity 0.4s ease;
-    opacity: 0;
-  }
-
-  /* ---- Ripple element (used for command state) ---- */
-  .ripple {
-    position: absolute;
-    width: 48px;
-    height: 48px;
-    border-radius: 50%;
-    border: 2px solid rgba(108, 140, 255, 0.5);
-    z-index: 1;
-    opacity: 0;
-    pointer-events: none;
-  }
-
-  /* =========================================
-     STATE: listening (idle)
-     Gentle breathing glow
-     ========================================= */
-  [data-status="listening"] .bubble {
-    animation: breathe 3s ease-in-out infinite;
-  }
-
-  @keyframes breathe {
-    0%, 100% {
-      box-shadow: 0 0 14px rgba(108, 140, 255, 0.35),
-                  0 0 4px rgba(108, 140, 255, 0.2);
-    }
-    50% {
-      box-shadow: 0 0 22px rgba(108, 140, 255, 0.55),
-                  0 0 8px rgba(108, 140, 255, 0.3);
-    }
-  }
-
-  /* =========================================
-     STATE: command (wake word detected)
-     Bright pulse + ripple expansion + scale up
-     ========================================= */
-  [data-status="command"] .bubble {
-    transform: scale(1.15);
-    background: #8aa8ff;
-    box-shadow: 0 0 28px rgba(108, 140, 255, 0.7),
-                0 0 10px rgba(108, 140, 255, 0.4);
-    animation: commandPulse 0.8s ease-in-out infinite;
-  }
-
-  [data-status="command"] .ripple {
-    animation: rippleExpand 1.2s ease-out infinite;
-  }
-
-  @keyframes commandPulse {
-    0%, 100% {
-      box-shadow: 0 0 28px rgba(108, 140, 255, 0.7),
-                  0 0 10px rgba(108, 140, 255, 0.4);
-    }
-    50% {
-      box-shadow: 0 0 36px rgba(138, 168, 255, 0.85),
-                  0 0 16px rgba(108, 140, 255, 0.5);
-    }
-  }
-
-  @keyframes rippleExpand {
-    0% {
-      transform: scale(1);
-      opacity: 0.6;
-    }
-    100% {
-      transform: scale(1.7);
-      opacity: 0;
-    }
-  }
-
-  /* =========================================
-     STATE: processing (generating note)
-     Spinning ring + warm color shift
-     ========================================= */
-  [data-status="processing"] .bubble {
-    background: linear-gradient(135deg, #6c8cff, #fbbf24);
-    box-shadow: 0 0 20px rgba(251, 191, 36, 0.5),
-                0 0 8px rgba(108, 140, 255, 0.3);
-    animation: processingPulse 1.5s ease-in-out infinite;
-  }
-
-  [data-status="processing"] .bubble::after {
-    opacity: 0.7;
-  }
-
-  [data-status="processing"] .ring {
-    opacity: 1;
-    border-color: transparent transparent #fbbf24 transparent;
-    animation: spin 1s linear infinite;
-  }
-
-  @keyframes processingPulse {
-    0%, 100% {
-      box-shadow: 0 0 20px rgba(251, 191, 36, 0.5),
-                  0 0 8px rgba(108, 140, 255, 0.3);
-    }
-    50% {
-      box-shadow: 0 0 28px rgba(251, 191, 36, 0.7),
-                  0 0 12px rgba(108, 140, 255, 0.4);
-    }
-  }
-
-  @keyframes spin {
-    from { transform: rotate(0deg); }
-    to { transform: rotate(360deg); }
-  }
-
-  /* =========================================
-     STATE: disconnected
-     Dimmed, gray, no animation
-     ========================================= */
-  [data-status="disconnected"] .bubble {
-    background: #555;
-    box-shadow: 0 0 6px rgba(80, 80, 80, 0.3);
+  #stage[data-phase="listening"],
+  #stage[data-phase="noting"],
+  #stage[data-phase="disconnected"] {
     animation: none;
   }
 
-  [data-status="disconnected"] .bubble::after {
-    opacity: 0.4;
+  /* ── ambient glow ── */
+  .glow {
+    position: absolute;
+    inset: calc(var(--size) * -0.15);
+    border-radius: 50%;
+    background: radial-gradient(circle, rgba(255,255,255,0.10) 0%, rgba(255,255,255,0.04) 35%, transparent 65%);
+    filter: blur(6px);
+    transform: scale(1);
+    transition: transform 0.6s cubic-bezier(0.22,1,0.36,1);
+    pointer-events: none;
+  }
+  #stage[data-phase="listening"] .glow,
+  #stage[data-phase="noting"] .glow {
+    transform: scale(1.12);
+  }
+
+  /* ── pulse halos ── */
+  .halos {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    pointer-events: none;
+    transform: translate(-50%, -50%);
+  }
+  .halos.near { width: var(--halo-near); height: var(--halo-near); }
+  .halos.far  { width: var(--halo-far);  height: var(--halo-far); }
+  .halo-ring {
+    position: absolute;
+    top: 0; left: 0;
+    width: 100%; height: 100%;
+    border-radius: 50%;
+    border: 1px solid rgba(255,255,255,0.55);
+    opacity: 0;
+    transform-origin: center;
+  }
+  #stage[data-phase="listening"] .halo-ring {
+    animation: pulseRing 2.4s cubic-bezier(0.22,1,0.36,1) infinite;
+  }
+  #stage[data-phase="noting"] .halo-ring {
+    animation: pulseRing 3s cubic-bezier(0.22,1,0.36,1) infinite;
+  }
+
+  /* ── ring layers (front / rear) ── */
+  .ring-layer {
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    transform-style: preserve-3d;
+  }
+  .ring-layer.rear  { transform: translateZ(-24px); }
+  .ring-layer.front { transform: translateZ(24px); }
+
+  .ring {
+    position: absolute;
+    top: 50%; left: 50%;
+    transform-style: preserve-3d;
+    pointer-events: none;
+  }
+  .ring-spin {
+    width: 100%; height: 100%;
+    border-radius: 50%;
+    position: relative;
+    animation-name: spinY;
+    animation-timing-function: linear;
+    animation-iteration-count: infinite;
+  }
+  .ring-spin.reverse { animation-name: spinYR; }
+
+  .ring-band {
+    position: absolute;
+    inset: 0;
+    border-radius: 50%;
+  }
+  .satellite {
+    position: absolute;
+    top: 50%; left: 0;
+    border-radius: 50%;
+    background: #fff;
+    transform: translate(-50%, -50%);
+    box-shadow: 0 0 8px rgba(255,255,255,0.9);
+  }
+
+  /* ── sphere ── */
+  .sphere {
+    position: absolute;
+    top: 50%; left: 50%;
+    width: var(--body);
+    height: var(--body);
+    border-radius: 50%;
+    transform: translate(-50%, -50%);
+    background: radial-gradient(circle at 32% 28%, #ffffff 0%, #d6d6d6 22%, #0a0a0a 78%);
+    box-shadow:
+      0 0 0 1px rgba(255,255,255,0.35),
+      0 0 44px rgba(255,255,255,0.25),
+      inset -10px -14px 32px rgba(0,0,0,0.95),
+      inset 8px 10px 22px rgba(255,255,255,0.55);
+    overflow: hidden;
+  }
+  .sphere > div { position: absolute; border-radius: 50%; }
+  .sphere .dots-light {
+    inset: calc(var(--body) * -0.18);
+    background-image: radial-gradient(circle at 2px 2px, #ffffff 2px, transparent 2.5px);
+    background-size: 8px 8px;
+    animation: spinY 28s linear infinite;
+    mix-blend-mode: screen;
+  }
+  .sphere .dots-dark {
+    inset: calc(var(--body) * -0.12);
+    background-image: radial-gradient(circle at 1px 1px, #000 1px, transparent 1.5px);
+    background-size: 4px 4px;
+    animation: spinYR 45s linear infinite;
+    mix-blend-mode: multiply;
+  }
+  .sphere .highlight {
+    top: 8%; left: 14%;
+    width: 44%; height: 30%;
+    background: radial-gradient(ellipse, rgba(255,255,255,1), transparent 70%);
+    filter: blur(3px);
+  }
+  .sphere .terminator {
+    inset: 0;
+    background: radial-gradient(circle at 70% 74%, transparent 38%, rgba(0,0,0,0.8) 80%);
+  }
+  .sphere .sphere-inset {
+    inset: 0;
+    box-shadow: inset 0 0 24px rgba(0,0,0,0.35);
+    pointer-events: none;
+  }
+  #stage[data-phase="listening"] .sphere .dots-light { animation-duration: 8s; }
+  #stage[data-phase="listening"] .sphere .dots-dark  { animation-duration: 12.8s; }
+  #stage[data-phase="noting"]    .sphere .dots-light { animation-duration: 5s; }
+  #stage[data-phase="noting"]    .sphere .dots-dark  { animation-duration: 8s; }
+
+  /* ── glass dome ── */
+  .glass-dome {
+    position: absolute;
+    top: 50%; left: 50%;
+    width: var(--body);
+    height: var(--body);
+    border-radius: 50%;
+    transform: translate(-50%, -50%);
+    background: linear-gradient(155deg, rgba(255,255,255,0.22) 0%, rgba(255,255,255,0.02) 45%, rgba(255,255,255,0.10) 100%);
+    border: 1px solid rgba(255,255,255,0.24);
+    box-shadow: inset 0 1px 1px rgba(255,255,255,0.4), inset 0 -6px 14px rgba(0,0,0,0.3);
+    pointer-events: none;
+  }
+
+  /* ── waveform ring (listening) ── */
+  .wave-ring {
+    position: absolute;
+    top: 50%; left: 50%;
+    width: var(--wave);
+    height: var(--wave);
+    transform: translate(-50%, -50%);
+    pointer-events: none;
+  }
+  .wave-bar {
+    position: absolute;
+    top: 50%; left: 50%;
+    width: 2px;
+    border-radius: 2px;
+    background: linear-gradient(180deg, rgba(255,255,255,0.95), rgba(255,255,255,0.35));
+    transform-origin: 50% 100%;
+    box-shadow: 0 0 5px rgba(255,255,255,0.6);
+    animation-name: waveBreathe;
+    animation-iteration-count: infinite;
+    animation-timing-function: ease-in-out;
+    animation-direction: alternate;
+  }
+
+  /* ── note ticks (noting) ── */
+  .note-ticks {
+    position: absolute;
+    top: 50%; left: 50%;
+    width: var(--size);
+    height: var(--size);
+    transform: translate(-50%, -50%);
+    pointer-events: none;
+  }
+  .tick-orbit {
+    position: absolute;
+    top: 50%; left: 50%;
+    width: 0; height: 0;
+    animation-name: orbitDot;
+    animation-timing-function: linear;
+    animation-iteration-count: infinite;
+  }
+  .tick-dot {
+    position: absolute;
+    top: 0; left: 0;
+    width: 3px; height: 3px;
+    border-radius: 50%;
+    background: #fff;
+    box-shadow: 0 0 7px rgba(255,255,255,0.85);
+    transform: translate(-50%, -50%);
+    animation: noteBlink 1.5s ease-in-out infinite;
+  }
+
+  /* ── sparkles (noting) ── */
+  .sparkles {
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+  }
+  .sparkle {
+    position: absolute;
+    top: 50%; left: 50%;
+    width: 4px; height: 4px;
+    border-radius: 50%;
+    background: #fff;
+    box-shadow: 0 0 10px rgba(255,255,255,0.9);
+    animation-name: sparkleBlink;
+    animation-iteration-count: infinite;
+    animation-timing-function: ease-in-out;
+  }
+
+  /* ── phase visibility ── */
+  #stage[data-phase="idle"] .wave-ring,
+  #stage[data-phase="idle"] .note-ticks,
+  #stage[data-phase="idle"] .sparkles,
+  #stage[data-phase="idle"] .halos,
+  #stage[data-phase="disconnected"] .wave-ring,
+  #stage[data-phase="disconnected"] .note-ticks,
+  #stage[data-phase="disconnected"] .sparkles,
+  #stage[data-phase="disconnected"] .halos { display: none; }
+
+  #stage[data-phase="listening"] .note-ticks,
+  #stage[data-phase="listening"] .sparkles { display: none; }
+
+  #stage[data-phase="noting"] .wave-ring { display: none; }
+
+  #stage[data-phase="disconnected"] { filter: grayscale(1) brightness(0.55); }
+  #stage[data-phase="disconnected"] * { animation-play-state: paused !important; }
+
+  /* ── keyframes ── */
+  @keyframes spinY  { from { transform: rotate(0deg); }   to { transform: rotate(360deg); } }
+  @keyframes spinYR { from { transform: rotate(360deg); } to { transform: rotate(0deg); } }
+
+  @keyframes bob { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(var(--bob)); } }
+
+  @keyframes pulseRing {
+    0%   { transform: scale(1);   opacity: 0.55; }
+    100% { transform: scale(1.6); opacity: 0; }
+  }
+
+  @keyframes waveBreathe {
+    from { transform: translate(-50%, -100%) rotate(var(--angle)) translateY(var(--offset)) scaleY(0.85); opacity: 0.8; }
+    to   { transform: translate(-50%, -100%) rotate(var(--angle)) translateY(var(--offset)) scaleY(1.15); opacity: 1; }
+  }
+
+  @keyframes orbitDot {
+    from { transform: rotate(0deg)   translateX(var(--r)) rotate(0deg); }
+    to   { transform: rotate(360deg) translateX(var(--r)) rotate(-360deg); }
+  }
+
+  @keyframes noteBlink {
+    0%, 100% { opacity: 0.25; scale: 0.7; }
+    50%      { opacity: 1;    scale: 1; }
+  }
+
+  @keyframes sparkleBlink {
+    0%, 100% { opacity: 0.25; transform: translate(calc(-50% + var(--sx)), calc(-50% + var(--sy))) scale(0.7); }
+    50%      { opacity: 1;    transform: translate(calc(-50% + var(--sx)), calc(-50% + var(--sy))) scale(1); }
   }
 </style>
 </head>
 <body>
-  <div class="bubble-container" id="container" data-status="disconnected">
-    <div class="ring"></div>
-    <div class="ripple"></div>
-    <div class="bubble" id="bubble"></div>
+  <div id="stage" data-phase="disconnected">
+    <div class="glow"></div>
+    <div class="halos near"></div>
+    <div class="halos far"></div>
+    <div class="ring-layer rear" id="rings-rear"></div>
+    <div class="sphere">
+      <div class="dots-light"></div>
+      <div class="dots-dark"></div>
+      <div class="highlight"></div>
+      <div class="terminator"></div>
+      <div class="sphere-inset"></div>
+    </div>
+    <div class="glass-dome"></div>
+    <div class="wave-ring" id="wave-ring"></div>
+    <div class="note-ticks" id="note-ticks"></div>
+    <div class="ring-layer front" id="rings-front"></div>
+    <div class="sparkles" id="sparkles"></div>
   </div>
 
 <script>
+  // Planet-bubble renderer — vanilla port of Deen-Bubble Claude Design.
+  // Single source of truth for size — keep in sync with --size CSS var
+  // and BUBBLE_SIZE in electron/main.js.
+  const SIZE = 160;
+  const BODY = Math.round(SIZE * 0.52);
+
+  const stage = document.getElementById('stage');
+
+  // ── halos: 3 staggered pulse rings per layer ──
+  function buildHalos() {
+    document.querySelectorAll('.halos').forEach((layer) => {
+      const count = 3;
+      const dur = 3.0;
+      for (let i = 0; i < count; i++) {
+        const el = document.createElement('div');
+        el.className = 'halo-ring';
+        el.style.animationDelay = (i * (dur / count)) + 's';
+        layer.appendChild(el);
+      }
+    });
+  }
+
+  // ── rings: 3 rear + 4 front, mixed orientations (matches source bubble.jsx:218-256) ──
+  const RINGS = [
+    { layer: 'rear',  scale: 1.00, tilt: 78, roll: 0,   thickness: 1,   dur: 32, reverse: false, opacity: 0.50, dashed: false, satellite: 0, delay: 0  },
+    { layer: 'rear',  scale: 0.90, tilt: 72, roll: -35, thickness: 0.8, dur: 22, reverse: true,  opacity: 0.40, dashed: true,  satellite: 0, delay: -3 },
+    { layer: 'rear',  scale: 0.78, tilt: 18, roll: 70,  thickness: 1,   dur: 18, reverse: false, opacity: 0.45, dashed: false, satellite: 4, delay: -5 },
+    { layer: 'front', scale: 0.98, tilt: 76, roll: 0,   thickness: 2.5, dur: 13, reverse: false, opacity: 0.95, dashed: false, satellite: 5, delay: 0  },
+    { layer: 'front', scale: 1.10, tilt: 70, roll: 38,  thickness: 0.8, dur: 30, reverse: true,  opacity: 0.55, dashed: true,  satellite: 0, delay: -2 },
+    { layer: 'front', scale: 1.04, tilt: 8,  roll: -14, thickness: 1,   dur: 20, reverse: true,  opacity: 0.65, dashed: false, satellite: 4, delay: -6 },
+    { layer: 'front', scale: 0.84, tilt: 74, roll: 0,   thickness: 1.2, dur: 16, reverse: true,  opacity: 0.75, dashed: false, satellite: 0, delay: -4 },
+  ];
+
+  function buildRings() {
+    RINGS.forEach((r) => {
+      const parent = document.getElementById(r.layer === 'rear' ? 'rings-rear' : 'rings-front');
+      const size = Math.max(2, SIZE * r.scale);
+
+      const ring = document.createElement('div');
+      ring.className = 'ring';
+      ring.style.width = size + 'px';
+      ring.style.height = size + 'px';
+      ring.style.transform = `translate(-50%, -50%) rotateZ(${r.roll}deg) rotateX(${r.tilt}deg)`;
+
+      const spin = document.createElement('div');
+      spin.className = 'ring-spin' + (r.reverse ? ' reverse' : '');
+      spin.style.animationDuration = r.dur + 's';
+      if (r.delay) spin.style.animationDelay = r.delay + 's';
+
+      const band = document.createElement('div');
+      band.className = 'ring-band';
+      band.style.border = `${r.thickness}px ${r.dashed ? 'dashed' : 'solid'} transparent`;
+      band.style.backgroundImage =
+        `conic-gradient(from 0deg, ` +
+        `rgba(255,255,255,0) 0%, ` +
+        `rgba(255,255,255,${r.opacity}) 22%, ` +
+        `rgba(255,255,255,${r.opacity * 0.15}) 42%, ` +
+        `rgba(255,255,255,${r.opacity}) 62%, ` +
+        `rgba(255,255,255,0) 82%, ` +
+        `rgba(255,255,255,0) 100%)`;
+      const maskRule = `radial-gradient(closest-side, transparent calc(100% - ${r.thickness}px), #000 calc(100% - ${r.thickness}px + 0.5px))`;
+      band.style.webkitMask = maskRule;
+      band.style.mask = maskRule;
+      band.style.boxShadow = `0 0 12px rgba(255,255,255,${r.opacity * 0.3})`;
+
+      spin.appendChild(band);
+
+      if (r.satellite > 0) {
+        const sat = document.createElement('div');
+        sat.className = 'satellite';
+        sat.style.width = r.satellite + 'px';
+        sat.style.height = r.satellite + 'px';
+        spin.appendChild(sat);
+      }
+
+      ring.appendChild(spin);
+      parent.appendChild(ring);
+    });
+  }
+
+  // ── waveform ring: 42 bars around the sphere ──
+  function buildWave() {
+    const container = document.getElementById('wave-ring');
+    const bars = 42;
+    const waveSize = BODY + 20;
+    const offset = -(waveSize / 2);
+    for (let i = 0; i < bars; i++) {
+      const angle = (i / bars) * 360;
+      const h = 6 + Math.abs(Math.sin(i * 0.9)) * 12;
+      const bar = document.createElement('div');
+      bar.className = 'wave-bar';
+      bar.style.height = h + 'px';
+      bar.style.setProperty('--angle', angle + 'deg');
+      bar.style.setProperty('--offset', offset + 'px');
+      bar.style.animationDuration = (0.7 + (i % 5) * 0.12) + 's';
+      bar.style.animationDelay = (i * 0.025) + 's';
+      container.appendChild(bar);
+    }
+  }
+
+  // ── note ticks: 14 orbit dots at varied radii + blink ──
+  function buildTicks() {
+    const container = document.getElementById('note-ticks');
+    for (let i = 0; i < 14; i++) {
+      const r = BODY / 2 + 12 + (i % 4) * 5;
+      const orbit = document.createElement('div');
+      orbit.className = 'tick-orbit';
+      orbit.style.setProperty('--r', r + 'px');
+      orbit.style.animationDuration = (5 + (i % 4)) + 's';
+      orbit.style.animationDelay = (i * 0.15) + 's';
+
+      const dot = document.createElement('div');
+      dot.className = 'tick-dot';
+      dot.style.animationDelay = (i * 0.1) + 's';
+
+      orbit.appendChild(dot);
+      container.appendChild(orbit);
+    }
+  }
+
+  // ── sparkles: 6 blinking dots around outer edge ──
+  function buildSparkles() {
+    const container = document.getElementById('sparkles');
+    for (let i = 0; i < 6; i++) {
+      const angle = (i / 6) * Math.PI * 2;
+      const r = SIZE * 0.45;
+      const sp = document.createElement('div');
+      sp.className = 'sparkle';
+      sp.style.setProperty('--sx', (Math.cos(angle) * r) + 'px');
+      sp.style.setProperty('--sy', (Math.sin(angle) * r * 0.32) + 'px');
+      sp.style.animationDuration = (1 + i * 0.2) + 's';
+      sp.style.animationDelay = (i * 0.15) + 's';
+      container.appendChild(sp);
+    }
+  }
+
+  buildHalos();
+  buildRings();
+  buildWave();
+  buildTicks();
+  buildSparkles();
+
+  // ─────────────────────────────────────────────────────────
+  // WebSocket sync — server vocab → design phase remap.
+  // Server emits: listening / command / processing.
+  // Client synthesizes 'disconnected' locally when WS closes.
+  // ─────────────────────────────────────────────────────────
   const WS_URL = 'ws://localhost:8765/ws';
   const RECONNECT_DELAY = 3000;
   const DRAG_THRESHOLD = 4;
 
-  const container = document.getElementById('container');
-  const bubble = document.getElementById('bubble');
+  const SERVER_TO_PHASE = {
+    listening: 'idle',
+    command: 'listening',
+    processing: 'noting',
+    disconnected: 'disconnected',
+  };
+
+  const chimeAudio = new Audio('./assets/siri-listening.mp3');
+  chimeAudio.preload = 'auto';
+  chimeAudio.volume = 0.8;
+
+  function playChime() {
+    try {
+      chimeAudio.currentTime = 0;
+      chimeAudio.play().catch(() => {});
+    } catch {}
+  }
 
   let ws = null;
   let reconnectTimer = null;
-  let audioCtx = null;
-  let prevStatus = 'disconnected';
+  let prevServerState = null;
 
-  function playTone(frequencies, duration = 0.08, gap = 0.02) {
-    // #region agent log
-    const preState = audioCtx ? audioCtx.state : 'not-created';
-    // #endregion
-    if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-    if (audioCtx.state === 'suspended') audioCtx.resume();
-    // #region agent log
-    fetch('http://127.0.0.1:7877/ingest/b58dc82e-754b-493e-931e-d738b6f38575',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'d0e376'},body:JSON.stringify({sessionId:'d0e376',location:'bubble.html:playTone',message:'playTone called',data:{frequencies,duration,gap,audioCtxStateBefore:preState,audioCtxStateAfter:audioCtx.state,sampleRate:audioCtx.sampleRate,currentTime:audioCtx.currentTime,destChannels:audioCtx.destination.maxChannelCount},timestamp:Date.now()})}).catch(()=>{});
-    // #endregion
-    let time = audioCtx.currentTime;
-    frequencies.forEach(freq => {
-      const osc = audioCtx.createOscillator();
-      const gain = audioCtx.createGain();
-      osc.connect(gain);
-      gain.connect(audioCtx.destination);
-      osc.frequency.value = freq;
-      osc.type = 'sine';
-      gain.gain.setValueAtTime(0.15, time);
-      gain.gain.exponentialRampToValueAtTime(0.001, time + duration);
-      osc.start(time);
-      osc.stop(time + duration + 0.01);
-      time += duration + gap;
-    });
+  function setStatus(serverState) {
+    const phase = SERVER_TO_PHASE[serverState] || 'disconnected';
+    stage.setAttribute('data-phase', phase);
+
+    if (serverState !== prevServerState) {
+      if (serverState === 'command') {
+        playChime();
+      } else if (serverState === 'processing') {
+        playChime();
+      } else if (serverState === 'listening' && prevServerState === 'processing') {
+        playChime();
+      }
+    }
+    prevServerState = serverState;
   }
 
-  // ---- WebSocket ----
   function connect() {
     if (ws && (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING)) return;
 
@@ -268,26 +558,36 @@
     }
   }
 
-  function setStatus(s) {
-    // #region agent log
-    const willPlay = (prevStatus === 'listening' && s === 'command') || (prevStatus === 'command' && s === 'processing') || (prevStatus === 'processing' && s === 'listening');
-    fetch('http://127.0.0.1:7877/ingest/b58dc82e-754b-493e-931e-d738b6f38575',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'d0e376'},body:JSON.stringify({sessionId:'d0e376',location:'bubble.html:setStatus',message:'setStatus called',data:{prevStatus,newStatus:s,willPlaySound:willPlay},timestamp:Date.now()})}).catch(()=>{});
-    // #endregion
-    if (prevStatus === 'listening' && s === 'command') playTone([523, 659]);
-    if (prevStatus === 'command' && s === 'processing') playTone([587], 0.12);
-    if (prevStatus === 'processing' && s === 'listening') playTone([784, 659, 523]);
-    prevStatus = s;
-    container.setAttribute('data-status', s);
+  // ─── Click-through toggle ───────────────────────────────
+  // Window starts in setIgnoreMouseEvents(true, {forward:true}) — clicks on
+  // the transparent padding pass through to apps behind. We listen to
+  // forwarded mousemove and flip interactivity on/off based on whether the
+  // cursor is inside the visible circular stage.
+  let interactive = false;
+  function updateInteractive(e) {
+    if (isDragging) return; // keep it sticky while dragging
+    const rect = stage.getBoundingClientRect();
+    const cx = rect.left + rect.width / 2;
+    const cy = rect.top + rect.height / 2;
+    const dx = e.clientX - cx;
+    const dy = e.clientY - cy;
+    const r = rect.width / 2;
+    const inside = (dx * dx + dy * dy) <= r * r;
+    if (inside !== interactive) {
+      interactive = inside;
+      window.bubbleAPI?.setInteractive(inside);
+    }
   }
+  document.addEventListener('mousemove', updateInteractive);
 
-  // ---- Drag + Click ----
+  // ─── Drag + Click (unchanged behavior) ───────────────────
   let isDragging = false;
   let dragStartX = 0;
   let dragStartY = 0;
   let hasMoved = false;
 
-  bubble.addEventListener('mousedown', (e) => {
-    if (e.button === 2) return; // right-click handled separately
+  stage.addEventListener('mousedown', (e) => {
+    if (e.button === 2) return;
     isDragging = true;
     hasMoved = false;
     dragStartX = e.screenX;
@@ -321,9 +621,6 @@
     }
   });
 
-  // ---- Right-click context menu handled by Electron main process ----
-
-  // ---- Start ----
   connect();
 </script>
 </body>

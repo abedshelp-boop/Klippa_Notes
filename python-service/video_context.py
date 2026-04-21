@@ -1,6 +1,6 @@
 """
 In-memory store for the currently playing video context,
-reported by the Klippa Chrome extension.
+reported by the Deen-Notes Chrome extension.
 """
 
 import threading

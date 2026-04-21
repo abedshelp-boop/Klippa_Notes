@@ -10,10 +10,10 @@ export default function NoteViewer({ note, onDelete }) {
     return (
       <div className="viewer-panel">
         <div className="viewer-empty">
-          <div className="viewer-empty-icon">K</div>
+          <div className="viewer-empty-icon">D</div>
           <div className="viewer-empty-text">No note selected</div>
           <div className="viewer-empty-hint">
-            Select a note from the sidebar or say "Hey Klippa" to create one
+            Select a note from the sidebar or say "Hey Deen" to create one
           </div>
         </div>
       </div>

@@ -1,5 +1,5 @@
 /**
- * Klippa Background Service Worker
+ * Deen-Notes Background Service Worker
  *
  * Receives video state messages from content scripts across all tabs,
  * deduplicates, and POSTs the current video context to the Python service.

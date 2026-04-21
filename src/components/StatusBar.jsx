@@ -1,7 +1,7 @@
 import React from 'react';
 
 const STATUS_LABELS = {
-  listening: 'Listening for "Hey Klippa" — or press Ctrl+Shift+N',
+  listening: 'Listening for "Hey Deen" — or press Ctrl+Shift+N',
   command: 'Heard you! Tell me what to note down...',
   processing: 'Processing your note...',
   error: 'Connection error',

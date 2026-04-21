@@ -6,7 +6,7 @@ from fastapi.middleware.cors import CORSMiddleware
 import database as db
 import video_context
 
-app = FastAPI(title="Klippa API")
+app = FastAPI(title="Deen-Notes API")
 
 app.add_middleware(
     CORSMiddleware,
@@ -115,11 +115,13 @@ async def get_video_context():
 
 @app.get("/settings")
 async def get_settings():
-    """Return current runtime settings."""
+    """Return current runtime settings. API keys are reported as booleans
+    only — we never echo the actual key back to the UI."""
     import config
     return {
         "buffer_length": config.BUFFER_DURATION_SEC,
-        "arabize_enabled": config.ARABIZE_ENABLED,
+        "has_openai_key": bool(config.OPENAI_API_KEY),
+        "has_assemblyai_key": bool(config.ASSEMBLYAI_API_KEY),
     }
 
 
@@ -131,10 +133,11 @@ async def update_settings(body: dict):
 
     if body.get("openai_api_key"):
         config.OPENAI_API_KEY = body["openai_api_key"]
-        ai_client._client = None
+        ai_client._openai_client = None
+    if body.get("assemblyai_api_key"):
+        config.ASSEMBLYAI_API_KEY = body["assemblyai_api_key"]
+        ai_client._aai_configured_key = None  # force reconfig on next call
     if body.get("buffer_length"):
         config.BUFFER_DURATION_SEC = int(body["buffer_length"])
-    if "arabize_enabled" in body:
-        config.ARABIZE_ENABLED = bool(body["arabize_enabled"])
 
     return {"success": True}

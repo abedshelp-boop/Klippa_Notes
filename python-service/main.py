@@ -1,9 +1,9 @@
 """
-Klippa Python Service — Entry Point
+Deen-Notes Python Service — Entry Point
 
 Starts three concurrent subsystems:
 1. System audio capture (WASAPI loopback -> ring buffer)
-2. Wake word listener (microphone -> openWakeWord "Hey Klippa")
+2. Wake word listener (microphone -> Porcupine "Hey Deen")
 3. FastAPI server (REST + WebSocket for Electron UI)
 """
 
@@ -18,7 +18,12 @@ sys.stdout.reconfigure(encoding='utf-8', errors='replace')
 sys.stderr.reconfigure(encoding='utf-8', errors='replace')
 
 import numpy as np
-from config import FASTAPI_HOST, FASTAPI_PORT, SLICE_DURATION_SEC, MEDIA_DETECT_THRESHOLD
+from config import (
+    BUFFER_DURATION_SEC,
+    FASTAPI_HOST,
+    FASTAPI_PORT,
+    MEDIA_DETECT_THRESHOLD,
+)
 from buffer import RingBuffer
 from mic_listener import record_command
 from wake_word import start_wake_word_listener
@@ -48,7 +53,7 @@ def on_wake_word_detected():
 
     media_was_paused = False
     try:
-        print("[Main] Hey Klippa! Listening for your command...")
+        print("[Main] Hey Deen! Listening for your command...")
         _broadcast_sync({"type": "status", "status": "command"})
 
         frozen_video = video_context.get_video()
@@ -61,7 +66,20 @@ def on_wake_word_detected():
             print(f"[Main] Mic recording failed: {e}")
             command_audio = None
 
-        system_audio = ring_buffer.read_last(SLICE_DURATION_SEC)
+        # User said "Hey Deen" but then said nothing — abort the whole note.
+        if command_audio is None:
+            print("[Main] User said nothing after wake word — canceling note.")
+            if media_was_paused:
+                resume_media()
+            _broadcast_sync({"type": "status", "status": "listening"})
+            return
+
+        # Read the full ring buffer rather than a fixed 300s slice — the VAD
+        # step inside process_note() trims this down to speech-only, so there
+        # is no benefit to pre-trimming here and a big downside for short
+        # content (a 60s Short would lose nothing; a 10-min lecture would
+        # lose its opening).
+        system_audio = ring_buffer.read_last(BUFFER_DURATION_SEC)
 
         if len(system_audio) == 0:
             print("[Main] No system audio captured yet, skipping.")
@@ -79,7 +97,8 @@ def on_wake_word_detected():
             _broadcast_sync({"type": "status", "status": "listening"})
             return
 
-        print(f"[Main] Captured {len(system_audio)} system audio samples. Processing...")
+        print(f"[Main] Captured {len(system_audio)} system audio samples "
+              f"({len(system_audio) / 16000:.1f}s raw). Processing...")
 
         if _server_loop:
             asyncio.run_coroutine_threadsafe(
@@ -115,7 +134,7 @@ def start_wake_word_thread():
     return t
 
 
-class KlippaServer(uvicorn.Server):
+class DeenServer(uvicorn.Server):
     def install_signal_handlers(self):
         pass
 
@@ -141,7 +160,7 @@ def main():
     global _server_loop
 
     print("=" * 50)
-    print("  KLIPPA - Voice-Activated Note Taker")
+    print("  DEEN-NOTES - Voice-Activated Note Taker")
     print("=" * 50)
     print()
 
@@ -173,11 +192,11 @@ def main():
         port=FASTAPI_PORT,
         log_level="warning",
     )
-    server = KlippaServer(config)
+    server = DeenServer(config)
 
     print(f"[Main] API server starting on http://{FASTAPI_HOST}:{FASTAPI_PORT}")
     print()
-    print("Say 'Hey Klippa' or press Ctrl+Shift+N to capture a note.")
+    print("Say 'Hey Deen' or press Ctrl+Shift+N to capture a note.")
     print()
 
     def shutdown(signum=None, frame=None):

@@ -1,15 +1,47 @@
 const { app, BrowserWindow, Tray, Menu, nativeImage, ipcMain, globalShortcut, screen } = require('electron');
 const path = require('path');
+const fs = require('fs');
 const { spawn } = require('child_process');
 const http = require('http');
+const { generateDIcon } = require('./icon');
 
 let mainWindow = null;
 let bubbleWindow = null;
 let tray = null;
 let pythonProcess = null;
+let bubbleVisible = true;
+let appState = { bubbleVisible: true };
 
 const isDev = !app.isPackaged;
 const PYTHON_API = 'http://127.0.0.1:8765';
+
+function appStatePath() {
+  return path.join(app.getPath('userData'), 'app-state.json');
+}
+
+function readAppState() {
+  try {
+    const raw = fs.readFileSync(appStatePath(), 'utf8');
+    return JSON.parse(raw);
+  } catch {
+    return {};
+  }
+}
+
+function writeAppState() {
+  try {
+    fs.writeFileSync(appStatePath(), JSON.stringify(appState, null, 2), 'utf8');
+  } catch (err) {
+    console.error('[State] Failed to persist:', err.message);
+  }
+}
+
+function broadcastBubbleVisibility() {
+  for (const w of BrowserWindow.getAllWindows()) {
+    if (w === bubbleWindow) continue;
+    try { w.webContents.send('bubble:visibility', bubbleVisible); } catch {}
+  }
+}
 
 function createWindow() {
   mainWindow = new BrowserWindow({
@@ -25,7 +57,7 @@ function createWindow() {
       contextIsolation: true,
       nodeIntegration: false,
     },
-    icon: path.join(__dirname, '..', 'assets', 'icon.png'),
+    icon: generateDIcon(256),
   });
 
   if (isDev) {
@@ -42,20 +74,32 @@ function createWindow() {
   });
 }
 
+// Visible bubble diameter. Must stay in sync with --size in electron/bubble.html.
+const BUBBLE_SIZE = 160;
+// Electron window is oversized so pulse halos + outer rings can fade out past
+// the visible bubble without hitting the window edge (which would clip into a
+// visible square). BUBBLE_WINDOW - BUBBLE_SIZE = padding on each side / 2.
+const BUBBLE_WINDOW = 320;
+
 function createBubbleWindow() {
   const { width: screenW, height: screenH } = screen.getPrimaryDisplay().workAreaSize;
 
   bubbleWindow = new BrowserWindow({
-    width: 80,
-    height: 80,
-    x: screenW - 100,
-    y: screenH - 100,
+    width: BUBBLE_WINDOW,
+    height: BUBBLE_WINDOW,
+    x: screenW - BUBBLE_WINDOW - 20,
+    y: screenH - BUBBLE_WINDOW - 20,
+    useContentSize: true,
     frame: false,
     transparent: true,
     alwaysOnTop: true,
     skipTaskbar: true,
     resizable: false,
+    movable: true,
+    minimizable: false,
+    maximizable: false,
     hasShadow: false,
+    show: false,
     webPreferences: {
       preload: path.join(__dirname, 'bubble-preload.js'),
       contextIsolation: true,
@@ -65,25 +109,51 @@ function createBubbleWindow() {
 
   bubbleWindow.loadFile(path.join(__dirname, 'bubble.html'));
   bubbleWindow.setAlwaysOnTop(true, 'screen-saver');
+  // Start click-through on the transparent padding; forwarding keeps mousemove
+  // firing in the renderer so it can toggle interactivity when the cursor
+  // enters the visible bubble.
+  bubbleWindow.setIgnoreMouseEvents(true, { forward: true });
 
   bubbleWindow.on('closed', () => {
     bubbleWindow = null;
   });
+
+  if (bubbleVisible) bubbleWindow.show();
 }
 
-function createTray() {
-  const iconPath = path.join(__dirname, '..', 'assets', 'icon.png');
-  let trayIcon;
-  try {
-    trayIcon = nativeImage.createFromPath(iconPath).resize({ width: 16, height: 16 });
-  } catch {
-    trayIcon = nativeImage.createEmpty();
+function showBubble() {
+  if (!bubbleWindow) {
+    createBubbleWindow();
+    bubbleWindow.show();
+  } else {
+    bubbleWindow.show();
   }
+  bubbleVisible = true;
+  appState.bubbleVisible = true;
+  writeAppState();
+  updateTrayMenu();
+  broadcastBubbleVisibility();
+}
 
-  tray = new Tray(trayIcon);
-  const contextMenu = Menu.buildFromTemplate([
+function hideBubble() {
+  if (bubbleWindow) bubbleWindow.hide();
+  bubbleVisible = false;
+  appState.bubbleVisible = false;
+  writeAppState();
+  updateTrayMenu();
+  broadcastBubbleVisibility();
+}
+
+function toggleBubble() {
+  if (bubbleVisible) hideBubble();
+  else showBubble();
+  return bubbleVisible;
+}
+
+function buildTrayMenu() {
+  return Menu.buildFromTemplate([
     {
-      label: 'Show Klippa',
+      label: 'Show Deen-Notes',
       click: () => {
         if (mainWindow) {
           mainWindow.show();
@@ -95,6 +165,10 @@ function createTray() {
       label: 'Capture Note (Ctrl+Shift+N)',
       click: triggerNoteCapture,
     },
+    {
+      label: bubbleVisible ? 'Hide desktop bubble' : 'Show desktop bubble',
+      click: toggleBubble,
+    },
     { type: 'separator' },
     {
       label: 'Quit',
@@ -104,9 +178,17 @@ function createTray() {
       },
     },
   ]);
+}
 
-  tray.setToolTip('Klippa - Listening...');
-  tray.setContextMenu(contextMenu);
+function updateTrayMenu() {
+  if (tray) tray.setContextMenu(buildTrayMenu());
+}
+
+function createTray() {
+  const trayIcon = generateDIcon(32);
+  tray = new Tray(trayIcon);
+  tray.setToolTip('Deen-Notes');
+  tray.setContextMenu(buildTrayMenu());
   tray.on('double-click', () => {
     if (mainWindow) {
       mainWindow.show();
@@ -209,6 +291,13 @@ ipcMain.handle('window:maximize', () => {
 ipcMain.handle('window:close', () => mainWindow?.hide());
 ipcMain.handle('trigger-note', () => triggerNoteCapture());
 
+ipcMain.handle('bubble:toggle', () => toggleBubble());
+ipcMain.handle('bubble:set-visible', (_e, v) => {
+  if (v) showBubble(); else hideBubble();
+  return bubbleVisible;
+});
+ipcMain.handle('bubble:get-visible', () => bubbleVisible);
+
 ipcMain.handle('bubble:show-main', () => {
   if (mainWindow) {
     mainWindow.show();
@@ -216,13 +305,31 @@ ipcMain.handle('bubble:show-main', () => {
   }
 });
 ipcMain.handle('bubble:trigger-note', () => triggerNoteCapture());
+ipcMain.on('bubble:set-interactive', (event, interactive) => {
+  if (!bubbleWindow) return;
+  // When interactive, the window catches clicks on the visible bubble.
+  // When not, clicks fall through to whatever is behind, but mousemove is
+  // still forwarded so the renderer can detect re-entry.
+  bubbleWindow.setIgnoreMouseEvents(!interactive, { forward: true });
+});
 ipcMain.on('bubble:move', (event, dx, dy) => {
   if (!bubbleWindow) return;
   const [x, y] = bubbleWindow.getPosition();
-  bubbleWindow.setPosition(x + dx, y + dy);
+  // setBounds re-asserts the locked 80x80 size on every move so Chromium's
+  // fractional-DPI rounding on Windows can't silently grow the HWND.
+  bubbleWindow.setBounds({
+    x: Math.round(x + dx),
+    y: Math.round(y + dy),
+    width: BUBBLE_WINDOW,
+    height: BUBBLE_WINDOW,
+  });
 });
 
 app.whenReady().then(() => {
+  appState = readAppState();
+  if (typeof appState.bubbleVisible !== 'boolean') appState.bubbleVisible = true;
+  bubbleVisible = appState.bubbleVisible;
+
   createWindow();
   createBubbleWindow();
   createTray();

@@ -1,5 +1,5 @@
 /**
- * Klippa Content Script
+ * Deen-Notes Content Script
  *
  * Injected into every page. Polls for <video> elements that are actively
  * playing and reports the page title + URL to the background service worker.
