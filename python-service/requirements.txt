@@ -1,5 +1,6 @@
 fastapi
 uvicorn[standard]
+python-multipart
 websockets
 aiosqlite
 openai
@@ -14,3 +15,4 @@ openwakeword
 pvporcupine>=4.0.0,<5.0.0
 pyaudiowpatch
 rapidfuzz
+pytest>=8.0
