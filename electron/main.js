@@ -756,6 +756,21 @@ ipcMain.on('bubble:move', (event, dx, dy) => {
 });
 
 app.whenReady().then(() => {
+  if (isDev) {
+    // Lazy require — the package touches Electron internals that aren't
+    // available before whenReady fires. Installs once into the userData
+    // directory; subsequent dev launches are no-ops.
+    try {
+      const installer = require('electron-devtools-installer');
+      const { default: install, REACT_DEVELOPER_TOOLS } = installer;
+      install(REACT_DEVELOPER_TOOLS)
+        .then((name) => console.log(`[DevTools] Installed: ${name}`))
+        .catch((err) => console.warn('[DevTools] Install failed:', err.message));
+    } catch (err) {
+      console.warn('[DevTools] electron-devtools-installer not available:', err.message);
+    }
+  }
+
   appState = readAppState();
   if (typeof appState.bubbleVisible !== 'boolean') appState.bubbleVisible = true;
   if (!appState.activeTarget || typeof appState.activeTarget !== 'object') {
