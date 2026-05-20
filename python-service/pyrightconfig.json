@@ -1,0 +1,9 @@
+{
+  "include": ["."],
+  "exclude": ["venv", "**/__pycache__", "tests"],
+  "typeCheckingMode": "basic",
+  "useLibraryCodeForTypes": true,
+  "reportMissingImports": "warning",
+  "reportMissingTypeStubs": false,
+  "pythonVersion": "3.11"
+}
