@@ -9,7 +9,10 @@
     "electron:dev": "concurrently \"vite\" \"wait-on http://localhost:5173 && electron .\"",
     "start": "electron .",
     "dist": "node scripts/copy-env.js && vite build && electron-builder --win nsis --x64",
-    "electron:build": "npm run dist"
+    "electron:build": "npm run dist",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "typecheck": "tsc --noEmit -p jsconfig.json"
   },
   "keywords": [
     "deen-notes",
