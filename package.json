@@ -7,8 +7,9 @@
     "dev": "vite",
     "build": "vite build",
     "electron:dev": "concurrently \"vite\" \"wait-on http://localhost:5173 && electron .\"",
-    "electron:build": "vite build && electron-builder",
-    "start": "electron ."
+    "start": "electron .",
+    "dist": "node scripts/copy-env.js && vite build && electron-builder --win nsis --x64",
+    "electron:build": "npm run dist"
   },
   "keywords": [
     "deen-notes",
@@ -19,11 +20,15 @@
   "author": "",
   "license": "MIT",
   "dependencies": {
+    "mermaid": "^11.15.0",
     "react": "^19.2.4",
     "react-dom": "^19.2.4",
     "react-markdown": "^10.1.0",
+    "recharts": "^3.8.1",
     "rehype-highlight": "^7.0.2",
     "rehype-katex": "^7.0.1",
+    "rehype-raw": "^7.0.0",
+    "rehype-sanitize": "^6.0.0",
     "remark-gfm": "^4.0.1",
     "remark-math": "^6.0.0"
   },
@@ -31,7 +36,71 @@
     "@vitejs/plugin-react": "^6.0.1",
     "concurrently": "^9.2.1",
     "electron": "^41.0.3",
+    "electron-builder": "^26.0.12",
+    "electron-devtools-installer": "^3.2.0",
+    "typescript": "^5.7.0",
     "vite": "^8.0.0",
+    "vitest": "^2.1.0",
     "wait-on": "^9.0.4"
+  },
+  "build": {
+    "appId": "com.abed.deennotes",
+    "productName": "Deen Notes",
+    "copyright": "Copyright © 2026 Abed",
+    "directories": {
+      "output": "release",
+      "buildResources": "build"
+    },
+    "files": [
+      "electron/**/*",
+      "dist/**/*",
+      "package.json",
+      "!src/**/*",
+      "!python-service/**/*",
+      "!vite.config.js",
+      "!**/*.map",
+      "!**/.env",
+      "!**/*.db",
+      "!pending/**/*",
+      "!debug-*.log",
+      "!*.md",
+      "!Hey-Deen_en_windows_v4_0_0.zip",
+      "!release/**/*"
+    ],
+    "asar": true,
+    "extraResources": [
+      {
+        "from": "python-service",
+        "to": "python-service",
+        "filter": [
+          "**/*",
+          "!__pycache__/**",
+          "!**/*.pyc"
+        ]
+      }
+    ],
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "icon": "build/icon.ico",
+      "requestedExecutionLevel": "asInvoker"
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "Deen Notes",
+      "uninstallDisplayName": "Deen Notes",
+      "deleteAppDataOnUninstall": false,
+      "runAfterFinish": true
+    }
   }
 }
