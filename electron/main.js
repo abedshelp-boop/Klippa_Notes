@@ -4,6 +4,7 @@ const fs = require('fs');
 const { spawn } = require('child_process');
 const http = require('http');
 const { generateDIcon } = require('./icon');
+const { createDebug } = require('./debug');
 
 // Phase 12: prefer the static logo asset (assets/icon-256.png +
 // build/icon.ico) over the legacy programmatic "D" generator. The
@@ -39,6 +40,7 @@ let appState = {
 };
 
 const isDev = !app.isPackaged;
+const debug = createDebug(isDev);
 const PYTHON_API = 'http://127.0.0.1:8765';
 
 function appStatePath() {
@@ -535,6 +537,7 @@ function startPythonService() {
       PYTHONIOENCODING: 'utf-8',
       PYTHONUTF8: '1',
       DEEN_NOTES_DATA_DIR: app.getPath('userData'),
+      ...(isDev ? { DEEN_DEV: '1' } : {}),
     },
     stdio: ['pipe', 'pipe', 'pipe'],
   });
@@ -764,10 +767,10 @@ app.whenReady().then(() => {
       const installer = require('electron-devtools-installer');
       const { default: install, REACT_DEVELOPER_TOOLS } = installer;
       install(REACT_DEVELOPER_TOOLS)
-        .then((name) => console.log(`[DevTools] Installed: ${name}`))
-        .catch((err) => console.warn('[DevTools] Install failed:', err.message));
+        .then((name) => debug.log('DevTools', 'installed', name))
+        .catch((err) => debug.warn('DevTools', 'install failed', err.message));
     } catch (err) {
-      console.warn('[DevTools] electron-devtools-installer not available:', err.message);
+      debug.warn('DevTools', 'installer not available', err.message);
     }
   }
 
