@@ -10,6 +10,7 @@ from config import (
     MAX_COMMAND_SEC,
     NO_SPEECH_TIMEOUT_SEC,
 )
+from debug import debug
 
 _p = pyaudio.PyAudio()
 
@@ -103,9 +104,15 @@ def record_command() -> np.ndarray | None:
                     start_threshold = max(SILENCE_THRESHOLD, ambient * 2.0)
                     continue_threshold = max(SILENCE_THRESHOLD * 0.5,
                                              start_threshold * 0.4)
-                    print(f"[Mic] Ambient={ambient:.5f}, "
-                          f"start={start_threshold:.5f}, "
-                          f"continue={continue_threshold:.5f}")
+                    debug.log(
+                        "Mic",
+                        "calibrated",
+                        {
+                            "ambient": ambient,
+                            "start_threshold": start_threshold,
+                            "continue_threshold": continue_threshold,
+                        },
+                    )
                 continue
 
             # Choose threshold based on whether speech has already started —
@@ -116,20 +123,34 @@ def record_command() -> np.ndarray | None:
             if smoothed_rms > active_threshold:
                 if not speech_started:
                     speech_started = True
-                    print(f"[Mic] Speech detected at {chunks_read * sec_per_chunk:.1f}s.")
+                    debug.log(
+                        "Mic",
+                        "speech detected",
+                        {"at_sec": chunks_read * sec_per_chunk},
+                    )
                 silent_chunks = 0
             else:
                 silent_chunks += 1
 
             # Stop case 1: speech happened, then went quiet for SILENCE_DURATION_SEC.
             if speech_started and silent_chunks >= silence_chunks_needed:
-                print(f"[Mic] {SILENCE_DURATION_SEC:.0f}s of silence after "
-                      f"{chunks_read * sec_per_chunk:.1f}s, stopping.")
+                debug.log(
+                    "Mic",
+                    "silence after speech — stopping",
+                    {
+                        "silence_sec": SILENCE_DURATION_SEC,
+                        "elapsed_sec": chunks_read * sec_per_chunk,
+                    },
+                )
                 break
 
             # Stop case 2: nothing was ever said. Abort the whole note.
             if not speech_started and chunks_read >= no_speech_timeout_chunks:
-                print(f"[Mic] No speech in {NO_SPEECH_TIMEOUT_SEC:.0f}s — aborting note.")
+                debug.warn(
+                    "Mic",
+                    "no speech — aborting note",
+                    {"timeout_sec": NO_SPEECH_TIMEOUT_SEC},
+                )
                 return None
     finally:
         stream.stop_stream()
@@ -147,5 +168,5 @@ def record_command() -> np.ndarray | None:
         audio = resample_poly(audio, SAMPLE_RATE // g, mic_rate // g).astype(np.float32)
 
     total_sec = len(audio) / SAMPLE_RATE
-    print(f"[Mic] Recorded {total_sec:.1f}s of command audio.")
+    debug.log("Mic", "recorded command audio", {"total_sec": total_sec})
     return audio

@@ -25,12 +25,14 @@ from config import (
     MEDIA_DETECT_THRESHOLD,
 )
 from buffer import RingBuffer
+from debug import debug
 from mic_listener import record_command
 from wake_word import start_wake_word_listener
 from note_generator import process_note
 from media_control import pause_media_if_playing, resume_media
 from routes import app, broadcast, set_trigger_callback
-import video_context
+import target as target_state
+import language as language_state
 
 ring_buffer = RingBuffer()
 stop_event = threading.Event()
@@ -47,28 +49,37 @@ def _broadcast_sync(message: dict):
 
 def on_wake_word_detected():
     """Called when the wake word is detected or trigger endpoint is hit."""
+    # Step-1 diagnostic: mark entry so we can see in logs which event triggered
+    # this (wake-word listener vs /trigger HTTP endpoint) and at what time.
+    debug.log("Main", "on_wake_word_detected ENTRY")
     if not _processing_lock.acquire(blocking=False):
-        print("[Main] Already processing a note, skipping.")
+        debug.log("Main", "already processing, skipping")
         return
 
     media_was_paused = False
     try:
-        print("[Main] Hey Deen! Listening for your command...")
+        debug.log("Main", "listening for command")
         _broadcast_sync({"type": "status", "status": "command"})
 
-        frozen_video = video_context.get_video()
+        # Snapshot target at capture-time so a mid-capture picker change
+        # can't redirect a note in flight.
+        frozen_target = target_state.get_target()
+        # Same reasoning for language — mid-capture picker swap shouldn't
+        # retroactively translate a note already mid-flight.
+        frozen_language = language_state.get_language()
 
         media_was_paused = pause_media_if_playing(ring_buffer)
+        debug.log("Main", "media_was_paused", media_was_paused)
 
         try:
             command_audio = record_command()
-        except Exception as e:
-            print(f"[Main] Mic recording failed: {e}")
+        except (OSError, RuntimeError) as e:
+            debug.error("Main", "mic recording failed", e)
             command_audio = None
 
         # User said "Hey Deen" but then said nothing — abort the whole note.
         if command_audio is None:
-            print("[Main] User said nothing after wake word — canceling note.")
+            debug.log("Main", "user said nothing — canceling note")
             if media_was_paused:
                 resume_media()
             _broadcast_sync({"type": "status", "status": "listening"})
@@ -82,7 +93,7 @@ def on_wake_word_detected():
         system_audio = ring_buffer.read_last(BUFFER_DURATION_SEC)
 
         if len(system_audio) == 0:
-            print("[Main] No system audio captured yet, skipping.")
+            debug.log("Main", "no system audio captured yet, skipping")
             if media_was_paused:
                 resume_media()
             _broadcast_sync({"type": "status", "status": "listening"})
@@ -90,25 +101,51 @@ def on_wake_word_detected():
 
         rms = float(np.sqrt(np.mean(system_audio ** 2)))
         if rms < MEDIA_DETECT_THRESHOLD:
-            print(f"[Main] System audio too quiet (RMS={rms:.6f}), "
-                  f"nothing meaningful to transcribe. Skipping.")
+            debug.log(
+                "Main",
+                "system audio too quiet — skipping",
+                {"rms": rms, "threshold": MEDIA_DETECT_THRESHOLD},
+            )
             if media_was_paused:
                 resume_media()
             _broadcast_sync({"type": "status", "status": "listening"})
             return
 
-        print(f"[Main] Captured {len(system_audio)} system audio samples "
-              f"({len(system_audio) / 16000:.1f}s raw). Processing...")
+        debug.log(
+            "Main",
+            "captured samples, processing",
+            {
+                "samples": len(system_audio),
+                "duration_sec": len(system_audio) / 16000,
+            },
+        )
 
         if _server_loop:
             asyncio.run_coroutine_threadsafe(
                 process_note(system_audio, command_audio, broadcast,
                              media_was_paused=media_was_paused,
-                             video_info=frozen_video),
+                             target=frozen_target,
+                             language=frozen_language),
                 _server_loop,
+            )
+            debug.log(
+                "Main",
+                "process_note dispatched",
+                {"media_was_paused": media_was_paused},
+            )
+        else:
+            debug.warn(
+                "Main",
+                "_server_loop is None — process_note NOT dispatched",
+                {"media_was_paused": media_was_paused},
             )
     finally:
         _processing_lock.release()
+        debug.log(
+            "Main",
+            "on_wake_word_detected FINALLY: lock released",
+            {"media_was_paused": media_was_paused},
+        )
 
 
 def start_audio_thread():
@@ -123,10 +160,21 @@ def start_audio_thread():
     return t
 
 
+def _on_wake_word_state_change(state: dict):
+    """Bridge wake-word state changes onto the WebSocket so the bubble can
+    show "wake-word offline" the moment the listener gives up, instead of
+    pretending it's alive forever."""
+    _broadcast_sync({
+        "type": "wake_word_state",
+        "status": state.get("status"),
+        "error": state.get("error"),
+    })
+
+
 def start_wake_word_thread():
     t = threading.Thread(
         target=start_wake_word_listener,
-        args=(on_wake_word_detected, stop_event),
+        args=(on_wake_word_detected, stop_event, _on_wake_word_state_change),
         daemon=True,
         name="wake-word",
     )
@@ -159,32 +207,29 @@ def _wait_for_port(host, port, timeout=10):
 def main():
     global _server_loop
 
-    print("=" * 50)
-    print("  DEEN-NOTES - Voice-Activated Note Taker")
-    print("=" * 50)
-    print()
+    debug.log("service", "started", "DEEN-NOTES Voice-Activated Note Taker")
 
     try:
         _wait_for_port(FASTAPI_HOST, FASTAPI_PORT, timeout=15)
     except RuntimeError as e:
-        print(f"[Main] {e}")
-        print("[Main] Another instance may be running. Exiting.")
+        debug.error("Main", "port already in use", e)
+        debug.error("Main", "another instance may be running — exiting")
         sys.exit(1)
 
     set_trigger_callback(on_wake_word_detected)
 
     try:
         audio_thread = start_audio_thread()
-        print("[Main] System audio capture started.")
-    except Exception as e:
-        print(f"[Main] Audio capture failed: {e}")
-        print("[Main] System audio capture disabled.")
+        debug.log("Main", "system audio capture started")
+    except (OSError, RuntimeError, ImportError) as e:
+        debug.error("Main", "audio capture failed", e)
+        debug.warn("Main", "system audio capture disabled")
 
     try:
         wake_thread = start_wake_word_thread()
-        print("[Main] Wake word listener started.")
-    except Exception as e:
-        print(f"[Main] Wake word failed: {e}")
+        debug.log("Main", "wake word listener started")
+    except (OSError, RuntimeError, ImportError) as e:
+        debug.error("Main", "wake word failed", e)
 
     config = uvicorn.Config(
         app,
@@ -194,13 +239,14 @@ def main():
     )
     server = DeenServer(config)
 
-    print(f"[Main] API server starting on http://{FASTAPI_HOST}:{FASTAPI_PORT}")
-    print()
-    print("Say 'Hey Deen' or press Ctrl+Shift+N to capture a note.")
-    print()
+    debug.log(
+        "Main",
+        "API server starting",
+        {"url": f"http://{FASTAPI_HOST}:{FASTAPI_PORT}"},
+    )
 
     def shutdown(signum=None, frame=None):
-        print("\n[Main] Shutting down...")
+        debug.log("Main", "shutting down")
         stop_event.set()
         server.should_exit = True
 
@@ -208,6 +254,9 @@ def main():
     try:
         signal.signal(signal.SIGTERM, shutdown)
     except (OSError, ValueError):
+        # Deliberate: signal.SIGTERM isn't supported on Windows; falling
+        # back to Ctrl+C only is intentional. Fires once at boot on every
+        # Windows launch — a log here would just be noise.
         pass
 
     loop = asyncio.new_event_loop()
@@ -216,12 +265,13 @@ def main():
 
     try:
         loop.run_until_complete(server.serve())
-    except Exception as e:
-        print(f"[Main] Server error: {e}")
+    except (OSError, RuntimeError) as e:
+        debug.error("Main", "server error", e)
+        raise
     finally:
         stop_event.set()
         loop.close()
-        print("[Main] Goodbye!")
+        debug.log("Main", "goodbye")
 
 
 if __name__ == "__main__":

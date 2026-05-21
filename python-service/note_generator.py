@@ -2,25 +2,43 @@ import asyncio
 from functools import partial
 from datetime import datetime, timezone
 
+from openai import APIError as OpenAIAPIError
+
 from resampler import audio_to_wav_bytes
-from ai_client import transcribe_audio, generate_note
-from database import create_note, find_note_by_video_url, append_to_note
+from ai_client import transcribe_audio, generate_note, translate_command_to_english
+from database import create_note, get_note, append_to_note
+import target as target_state
 from config import (
     PENDING_DIR,
     SAMPLE_RATE,
     SLICE_DURATION_SEC,
     TRANSCRIPT_MAX_WORDS_PER_SEC,
 )
+from debug import debug
 from media_control import resume_media
 from quran_lookup import enrich_quran_in_transcript
 from vad import extract_speech
 
 
 async def process_note(system_audio, command_audio, broadcast_fn,
-                       media_was_paused=False, video_info=None):
+                       media_was_paused=False, target=None,
+                       language=None):
     """
     Full pipeline: audio -> VAD trim -> transcription -> note generation -> save.
     Runs blocking AI calls in a thread pool.
+
+    target: snapshot of the routing target at capture time:
+      {"note_id": str | None, "create_new_pending": bool}
+      - note_id set     -> append to that existing note
+      - create_new_pending=True -> create new note, then pin target to it
+      - both falsy      -> create a new note per capture (default)
+
+    language: snapshot of the output-language preference at capture time:
+      {"code": str, "label": str, "emoji": str}
+      - code == "auto" preserves Rule 8 (audio-dominant) in the LLM prompt.
+      - any other code appends an OUTPUT LANGUAGE OVERRIDE that forces the
+        note into that language while leaving Quran preservation intact.
+      None == treat as "auto" (back-compat for any caller that doesn't pass it).
     """
     loop = asyncio.get_event_loop()
 
@@ -41,8 +59,10 @@ async def process_note(system_audio, command_audio, broadcast_fn,
         )
 
         if len(system_audio) == 0:
-            print("[Deen] VAD found no speech — aborting note instead of "
-                  "transcribing silence.")
+            debug.warn(
+                "Deen",
+                "VAD found no speech — aborting note",
+            )
             _save_pending(
                 orig_system_audio, command_audio,
                 "VAD detected no speech in captured audio",
@@ -77,14 +97,46 @@ async def process_note(system_audio, command_audio, broadcast_fn,
                 command_transcript = await loop.run_in_executor(
                     None, partial(transcribe_audio, command_wav, with_speakers=False)
                 )
-            except Exception as e:
-                print(f"[Deen] Command transcription failed, using default: {e}")
+            except (OSError, RuntimeError, ValueError, OpenAIAPIError) as e:
+                debug.warn(
+                    "Deen",
+                    "command transcription failed, using default",
+                    e,
+                )
+
+        # Detect command language. Cheap Arabic-block check — covers the
+        # main non-English case Deen-Notes sees. Any other language falls
+        # through as "en" for now; add more branches here if needed.
+        command_lang = (
+            "ar"
+            if any("\u0600" <= ch <= "\u06ff" for ch in command_transcript)
+            else "en"
+        )
+        # Pre-translate non-English commands to English so the main LLM
+        # isn't handed an Arabic instruction inside a primarily-English
+        # prompt (the failure mode was the model treating the Arabic as
+        # transcript to echo instead of an instruction to interpret).
+        command_transcript_en = None
+        if command_lang != "en":
+            command_transcript_en = await loop.run_in_executor(
+                None, translate_command_to_english, command_transcript
+            )
+            if command_transcript_en:
+                debug.log(
+                    "Deen",
+                    f"command translated ({command_lang}→en)",
+                    command_transcript_en,
+                )
 
         # Always dump the full transcript to disk for post-hoc debugging.
         # Prior version only printed the first 100 chars to stdout, which
-        # made triaging hallucinations impossible after the fact.
+        # made triaging hallucinations impossible after the fact. Includes
+        # command language + translation so triage can distinguish "LLM
+        # ignored the command" from "command mis-transcribed/-translated".
         _save_transcript_log(timestamp, command_transcript, system_transcript,
-                             speech_duration_sec, video_info)
+                             speech_duration_sec,
+                             command_lang=command_lang,
+                             command_transcript_en=command_transcript_en)
 
         # Hallucination heuristic: real speech tops out around 3-4 words/sec.
         # A transcript dramatically denser than its own speech duration is
@@ -93,9 +145,16 @@ async def process_note(system_audio, command_audio, broadcast_fn,
         word_count = len(system_transcript.split())
         wps = word_count / speech_duration_sec if speech_duration_sec > 0 else 0.0
         if wps > TRANSCRIPT_MAX_WORDS_PER_SEC:
-            print(f"[Deen] ⚠ Suspicious word rate: {word_count} words in "
-                  f"{speech_duration_sec:.1f}s of speech ({wps:.2f} wps > "
-                  f"{TRANSCRIPT_MAX_WORDS_PER_SEC}). Saving audio for review.")
+            debug.warn(
+                "Deen",
+                "suspicious word rate (possible hallucination)",
+                {
+                    "word_count": word_count,
+                    "speech_sec": speech_duration_sec,
+                    "wps": wps,
+                    "threshold_wps": TRANSCRIPT_MAX_WORDS_PER_SEC,
+                },
+            )
             _save_pending(
                 orig_system_audio, command_audio,
                 f"Suspicious word rate {wps:.2f} wps "
@@ -103,44 +162,99 @@ async def process_note(system_audio, command_audio, broadcast_fn,
                 suffix="_suspicious",
             )
 
-        print(f"[Deen] System transcript ({len(system_transcript)} chars, "
-              f"{word_count} words, {wps:.2f} wps): "
-              f"{system_transcript[:100]}...")
-        print(f"[Deen] Command: {command_transcript}")
+        debug.log(
+            "Deen",
+            "system transcript",
+            {
+                "chars": len(system_transcript),
+                "words": word_count,
+                "wps": wps,
+                "preview": system_transcript[:100],
+            },
+        )
+        debug.log("Deen", "command", command_transcript)
 
-        video_title = video_info["title"] if video_info else None
-        video_url = video_info["url"] if video_info else ""
-
-        if video_title:
-            print(f"[Deen] Video context: {video_title}")
+        target_language = (language or {}).get("code", "auto") or "auto"
+        target_language_label = (language or {}).get("label", "Global") or "Global"
+        debug.log(
+            "Deen",
+            "target output language",
+            {"label": target_language_label, "code": target_language},
+        )
 
         note_data = await loop.run_in_executor(
             None, partial(generate_note, system_transcript, command_transcript,
-                          video_title=video_title)
+                          command_lang=command_lang,
+                          command_transcript_en=command_transcript_en,
+                          target_language=target_language,
+                          target_language_label=target_language_label)
         )
 
-        existing_note = await find_note_by_video_url(video_url) if video_url else None
+        # End-to-end triage trail: append the LLM's note content to the
+        # same log file, so one file shows what the user said → what the
+        # LLM received → what it produced.
+        _append_note_content_to_log(timestamp, note_data.get("content", ""))
+
+        # Routing — user-selected target (replaces old video-URL match):
+        # 1) Pinned to an existing note → append.
+        # 2) "Create new file" pending → create + auto-pin to the new note.
+        # 3) No selection (or stale target whose note was deleted) →
+        #    create a fresh note. If the target was stale, also clear it so
+        #    the bubble label reverts to "Choose file" — silently re-pinning
+        #    to a brand-new note would surprise the user.
+        existing_note = None
+        target_was_stale = False
+        if target and target.get("note_id"):
+            existing_note = await get_note(target["note_id"])
+            if existing_note is None:
+                target_was_stale = True
 
         if existing_note:
             updated = await append_to_note(
                 existing_note["id"], note_data.get("content", system_transcript)
             )
             await broadcast_fn({"type": "note_updated", "note": updated})
-            print(f"[Deen] Appended to existing note: {existing_note['title']}")
+            debug.log("Deen", "appended to existing note", existing_note["title"])
         else:
             note = await create_note(
                 title=note_data.get("title", "Untitled Note"),
                 content=note_data.get("content", system_transcript),
                 tags=note_data.get("tags", []),
                 source=note_data.get("source", ""),
-                video_url=video_url,
             )
             await broadcast_fn({"type": "note", "note": note})
-            print(f"[Deen] Note created: {note['title']}")
+            debug.log("Deen", "note created", note["title"])
+
+            if target and target.get("create_new_pending"):
+                # User explicitly asked for "Create new file" — pin target
+                # to this new note so subsequent captures append to it.
+                target_state.set_target(note["id"])
+                await broadcast_fn({
+                    "type": "target",
+                    "note_id": note["id"],
+                    "create_new_pending": False,
+                    "title": note["title"],
+                })
+            elif target_was_stale:
+                # Pinned target's note was deleted while we were pinned.
+                # Reset to default and tell the bubble.
+                target_state.clear_target()
+                await broadcast_fn({
+                    "type": "target",
+                    "note_id": None,
+                    "create_new_pending": False,
+                    "title": None,
+                })
 
     except Exception as e:
-        print(f"[Deen] Error processing note: {e}")
+        # Pipeline crosses many subsystems (Whisper/AssemblyAI/LLM/DB/disk)
+        # each with its own exception taxonomy. Per Abed's decision: log
+        # loudly, save audio for retry, then re-raise so the caller sees
+        # the error (no deliberate swallow). The previous bare-except
+        # swallowed every failure silently.
+        debug.error("note_generator", "pipeline failed", e)
         _save_pending(orig_system_audio, command_audio, str(e))
+        raise
 
     finally:
         if media_was_paused:
@@ -149,23 +263,44 @@ async def process_note(system_audio, command_audio, broadcast_fn,
 
 
 def _save_transcript_log(timestamp, command_transcript, system_transcript,
-                          speech_duration_sec, video_info):
+                          speech_duration_sec,
+                          command_lang="en", command_transcript_en=None):
     """Always-on transcript dump for post-hoc hallucination triage. One small
-    text file per note; no rotation yet (add later if disk pressure appears)."""
+    text file per note; no rotation yet (add later if disk pressure appears).
+
+    command_lang / command_transcript_en: recorded alongside the original so
+    bug triage can distinguish "LLM ignored a correctly-transcribed command"
+    from "command was mis-transcribed or mis-translated before the LLM saw
+    it" — the three Arabic-command bug classes look identical on the surface.
+    """
     try:
         path = PENDING_DIR / f"{timestamp}_transcript.txt"
         with open(path, "w", encoding="utf-8") as f:
             f.write(f"timestamp: {timestamp}\n")
             f.write(f"speech_duration_sec: {speech_duration_sec:.2f}\n")
-            if video_info:
-                f.write(f"video_title: {video_info.get('title', '')}\n")
-                f.write(f"video_url: {video_info.get('url', '')}\n")
             f.write("\n=== USER COMMAND ===\n")
+            f.write(f"language: {command_lang}\n")
             f.write((command_transcript or "") + "\n")
+            if command_transcript_en:
+                f.write("\n=== USER COMMAND (English translation) ===\n")
+                f.write(command_transcript_en + "\n")
             f.write("\n=== SYSTEM TRANSCRIPT ===\n")
             f.write((system_transcript or "") + "\n")
-    except Exception as e:
-        print(f"[Deen] Failed to save transcript log: {e}")
+    except (OSError, ValueError) as e:
+        debug.warn("Deen", "failed to save transcript log", e)
+
+
+def _append_note_content_to_log(timestamp, note_content):
+    """Append the final LLM-generated note body to the transcript log so one
+    file shows: what the user said → what the LLM received → what it
+    produced. Silent on failure — this is diagnostic, not critical path."""
+    try:
+        path = PENDING_DIR / f"{timestamp}_transcript.txt"
+        with open(path, "a", encoding="utf-8") as f:
+            f.write("\n=== LLM OUTPUT (content) ===\n")
+            f.write((note_content or "") + "\n")
+    except (OSError, ValueError) as e:
+        debug.warn("Deen", "failed to append note content to log", e)
 
 
 def _save_pending(system_audio, command_audio, error_msg, suffix=""):
@@ -191,6 +326,6 @@ def _save_pending(system_audio, command_audio, error_msg, suffix=""):
         with open(err_path, "w", encoding="utf-8") as f:
             f.write(error_msg)
 
-        print(f"[Deen] Saved pending note to {PENDING_DIR / stamp}*")
-    except Exception as save_err:
-        print(f"[Deen] Failed to save pending: {save_err}")
+        debug.log("Deen", "saved pending note", str(PENDING_DIR / stamp))
+    except OSError as save_err:
+        debug.error("Deen", "failed to save pending", save_err)

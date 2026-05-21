@@ -459,10 +459,3 @@ def get_keyterms(max_words: int = 750) -> list[str]:
         out.append(term)
         word_total += words
     return out
-
-
-if __name__ == "__main__":
-    terms = get_keyterms()
-    print(f"{len(terms)} keyterms loaded (cap is 1000)")
-    print(f"First 5:  {terms[:5]}")
-    print(f"Last 5:   {terms[-5:]}")

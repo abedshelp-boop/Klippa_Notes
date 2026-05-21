@@ -4,7 +4,13 @@ from dotenv import load_dotenv
 
 ROOT_DIR = Path(__file__).resolve().parent.parent
 SERVICE_DIR = Path(__file__).resolve().parent
-load_dotenv(ROOT_DIR / ".env")
+# Prefer the bundled .env that ships next to config.py (packaged installer).
+# Fall back to repo-root .env so `npm run electron:dev` uses the source-of-truth file.
+_bundled_env = SERVICE_DIR / ".env"
+if _bundled_env.exists():
+    load_dotenv(_bundled_env)
+else:
+    load_dotenv(ROOT_DIR / ".env")
 
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
 PICOVOICE_ACCESS_KEY = os.getenv("PICOVOICE_ACCESS_KEY", "")
@@ -78,8 +84,16 @@ PORCUPINE_SENSITIVITY = float(os.getenv("PORCUPINE_SENSITIVITY", "0.6"))
 
 MEDIA_DETECT_THRESHOLD = float(os.getenv("MEDIA_DETECT_THRESHOLD", "0.005"))
 
+# Where klippa.db and pending/ live. Electron passes DEEN_NOTES_DATA_DIR
+# pointing at app.getPath('userData') in packaged mode so user notes survive
+# uninstall/reinstall. In `npm run electron:dev` no env var is set and we
+# fall back to ROOT_DIR so the existing dev-time klippa.db keeps working.
+_data_dir_env = os.getenv("DEEN_NOTES_DATA_DIR", "").strip()
+DATA_DIR = Path(_data_dir_env) if _data_dir_env else ROOT_DIR
+DATA_DIR.mkdir(parents=True, exist_ok=True)
+
 # DB filename kept as klippa.db to preserve existing notes from before the rename.
 # Don't change this without writing a migration.
-DB_PATH = ROOT_DIR / "klippa.db"
-PENDING_DIR = ROOT_DIR / "pending"
+DB_PATH = DATA_DIR / "klippa.db"
+PENDING_DIR = DATA_DIR / "pending"
 PENDING_DIR.mkdir(exist_ok=True)

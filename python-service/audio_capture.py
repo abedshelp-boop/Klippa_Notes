@@ -7,6 +7,7 @@ from math import gcd
 
 from buffer import RingBuffer
 from config import SAMPLE_RATE
+from debug import debug
 
 DEVICE_CHECK_INTERVAL_SEC = 3
 
@@ -46,7 +47,8 @@ def _get_current_default_output_name(p: pyaudio.PyAudio):
         wasapi_info = p.get_host_api_info_by_type(pyaudio.paWASAPI)
         default_idx = wasapi_info["defaultOutputDevice"]
         return p.get_device_info_by_index(default_idx)["name"]
-    except Exception:
+    except (OSError, ValueError) as e:
+        debug.warn("Audio", "WASAPI host-info probe failed", e)
         return None
 
 
@@ -59,8 +61,12 @@ def start_system_audio_capture(ring_buffer: RingBuffer, stop_event: threading.Ev
         try:
             device, output_name = _find_default_loopback(p)
         except RuntimeError as e:
-            print(f"[Audio] {e}")
-            print(f"[Audio] Retrying in {DEVICE_CHECK_INTERVAL_SEC}s...")
+            debug.warn("Audio", "device probe failed", e)
+            debug.log(
+                "Audio",
+                "retrying",
+                {"interval_sec": DEVICE_CHECK_INTERVAL_SEC},
+            )
             p.terminate()
             stop_event.wait(DEVICE_CHECK_INTERVAL_SEC)
             continue
@@ -73,9 +79,17 @@ def start_system_audio_capture(ring_buffer: RingBuffer, stop_event: threading.Ev
         up = SAMPLE_RATE // g
         down = device_rate // g
 
-        print(f"[Audio] Default output device: {output_name}")
-        print(f"[Audio] Opening loopback: {device['name']} "
-              f"(idx={device['index']}, rate={device_rate}Hz, ch={device_channels})")
+        debug.log("Audio", "default output device", output_name)
+        debug.log(
+            "Audio",
+            "opening loopback",
+            {
+                "name": device["name"],
+                "idx": device["index"],
+                "rate": device_rate,
+                "ch": device_channels,
+            },
+        )
 
         try:
             stream = p.open(
@@ -87,13 +101,12 @@ def start_system_audio_capture(ring_buffer: RingBuffer, stop_event: threading.Ev
                 frames_per_buffer=frames_per_buffer,
             )
         except OSError as e:
-            print(f"[Audio] Failed to open loopback stream: {e}")
-            print("[Audio] This can happen if no audio output device is active.")
+            debug.error("Audio", "failed to open loopback stream", e)
             p.terminate()
             stop_event.wait(DEVICE_CHECK_INTERVAL_SEC)
             continue
 
-        print(f"[Audio] Capturing system audio -> {SAMPLE_RATE}Hz mono")
+        debug.log("Audio", "capturing system audio", {"sample_rate": SAMPLE_RATE})
 
         last_check = time.monotonic()
 
@@ -117,26 +130,36 @@ def start_system_audio_capture(ring_buffer: RingBuffer, stop_event: threading.Ev
                     try:
                         new_name = _get_current_default_output_name(check_p)
                         if new_name and new_name != output_name:
-                            print(f"[Audio] Output device changed: "
-                                  f"'{output_name}' -> '{new_name}'")
-                            print("[Audio] Switching loopback capture...")
+                            debug.log(
+                                "Audio",
+                                "output device changed",
+                                {"from": output_name, "to": new_name},
+                            )
+                            debug.log("Audio", "switching loopback capture")
                             break
                     finally:
                         check_p.terminate()
 
             except OSError:
-                print("[Audio] Stream error (device may have disconnected). "
-                      "Reconnecting...")
+                debug.warn(
+                    "Audio",
+                    "stream error — reconnecting (device may have disconnected)",
+                )
                 break
-            except Exception as e:
-                print(f"[Audio] Error: {e}")
+            except (ValueError, RuntimeError) as e:
+                # Catch-all here is dangerous — assertion errors in the resample
+                # path would also get swallowed. Narrow as we learn the real
+                # exception classes.
+                debug.error("Audio", "stream loop error", e)
                 time.sleep(0.5)
 
         try:
             stream.stop_stream()
             stream.close()
-        except Exception:
+        except OSError:
+            # Deliberate: stream may already be closed if device hot-unplugged
+            # mid-read; swallowing the close-error is correct in that path.
             pass
         p.terminate()
 
-    print("[Audio] System audio capture stopped.")
+    debug.log("Audio", "system audio capture stopped")

@@ -4,6 +4,9 @@ import uuid
 from datetime import datetime, timezone
 from config import DB_PATH
 
+# Sentinel used by update_note() to distinguish "leave field alone" from "set to NULL".
+_UNSET = object()
+
 
 async def init_db():
     async with aiosqlite.connect(DB_PATH) as db:
@@ -20,17 +23,44 @@ async def init_db():
             )
         """)
 
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS groups (
+                id TEXT PRIMARY KEY,
+                name TEXT NOT NULL,
+                parent_id TEXT REFERENCES groups(id) ON DELETE SET NULL,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            )
+        """)
+
         # Migration for existing databases that lack the video_url column.
         cursor = await db.execute("PRAGMA table_info(notes)")
         columns = {row[1] for row in await cursor.fetchall()}
         if "video_url" not in columns:
             await db.execute("ALTER TABLE notes ADD COLUMN video_url TEXT DEFAULT ''")
 
+        # Migration for existing databases that lack the group_id column.
+        # SQLite accepts REFERENCES in the column def but doesn't enforce it
+        # unless PRAGMA foreign_keys = ON; we handle cascade manually in delete_group.
+        if "group_id" not in columns:
+            await db.execute(
+                "ALTER TABLE notes ADD COLUMN group_id TEXT "
+                "REFERENCES groups(id) ON DELETE SET NULL"
+            )
+
+        await db.execute(
+            "CREATE INDEX IF NOT EXISTS idx_groups_parent ON groups(parent_id)"
+        )
+        await db.execute(
+            "CREATE INDEX IF NOT EXISTS idx_notes_group ON notes(group_id)"
+        )
+
         await db.commit()
 
 
 async def create_note(title: str, content: str, tags: list,
-                      source: str = "", video_url: str = "") -> dict:
+                      source: str = "", video_url: str = "",
+                      group_id: str | None = None) -> dict:
     note_id = str(uuid.uuid4())
     now = datetime.now(timezone.utc).isoformat()
     note = {
@@ -40,13 +70,14 @@ async def create_note(title: str, content: str, tags: list,
         "tags": json.dumps(tags),
         "source": source,
         "video_url": video_url,
+        "group_id": group_id,
         "created_at": now,
         "updated_at": now,
     }
     async with aiosqlite.connect(DB_PATH) as db:
         await db.execute(
-            "INSERT INTO notes (id, title, content, tags, source, video_url, created_at, updated_at) "
-            "VALUES (:id, :title, :content, :tags, :source, :video_url, :created_at, :updated_at)",
+            "INSERT INTO notes (id, title, content, tags, source, video_url, group_id, created_at, updated_at) "
+            "VALUES (:id, :title, :content, :tags, :source, :video_url, :group_id, :created_at, :updated_at)",
             note,
         )
         await db.commit()
@@ -90,30 +121,169 @@ async def search_notes(query: str) -> list:
         return [_row_to_dict(r) for r in rows]
 
 
-async def find_note_by_video_url(video_url: str) -> dict | None:
-    """Return the most recent note associated with a video URL, or None."""
-    if not video_url:
-        return None
-    async with aiosqlite.connect(DB_PATH) as db:
-        db.row_factory = aiosqlite.Row
-        cursor = await db.execute(
-            "SELECT * FROM notes WHERE video_url = ? ORDER BY created_at DESC LIMIT 1",
-            (video_url,),
-        )
-        row = await cursor.fetchone()
-        return _row_to_dict(row) if row else None
+async def append_to_note(note_id: str, new_content: str,
+                         separator: str = "\n\n---\n\n") -> dict | None:
+    """Append markdown content to an existing note and update its timestamp.
 
-
-async def append_to_note(note_id: str, new_content: str) -> dict | None:
-    """Append markdown content to an existing note and update its timestamp."""
+    The default separator preserves the legacy behavior (horizontal rule
+    between consecutive captures). Push-to-talk dictation passes "\\n\\n"
+    for a softer break.
+    """
     now = datetime.now(timezone.utc).isoformat()
     async with aiosqlite.connect(DB_PATH) as db:
         await db.execute(
             "UPDATE notes SET content = content || ? , updated_at = ? WHERE id = ?",
-            ("\n\n---\n\n" + new_content, now, note_id),
+            (separator + new_content, now, note_id),
         )
         await db.commit()
     return await get_note(note_id)
+
+
+async def update_note(note_id: str, *,
+                      title=_UNSET, content=_UNSET,
+                      group_id=_UNSET, tags=_UNSET, source=_UNSET) -> dict | None:
+    """Partial update of a note. Pass _UNSET (default) to leave a field alone.
+
+    Pass None for `group_id` to detach a note from its group.
+    `tags` may be a list (will be JSON-encoded) or a JSON string.
+    Returns the updated note dict, or None if the id doesn't exist.
+    """
+    fields: list[str] = []
+    values: list = []
+
+    if title is not _UNSET:
+        fields.append("title = ?")
+        values.append(title)
+    if content is not _UNSET:
+        fields.append("content = ?")
+        values.append(content)
+    if group_id is not _UNSET:
+        fields.append("group_id = ?")
+        values.append(group_id)
+    if tags is not _UNSET:
+        fields.append("tags = ?")
+        values.append(tags if isinstance(tags, str) else json.dumps(tags))
+    if source is not _UNSET:
+        fields.append("source = ?")
+        values.append(source)
+
+    if not fields:
+        # Nothing to update — return current state.
+        return await get_note(note_id)
+
+    fields.append("updated_at = ?")
+    values.append(datetime.now(timezone.utc).isoformat())
+    values.append(note_id)
+
+    async with aiosqlite.connect(DB_PATH) as db:
+        cursor = await db.execute(
+            f"UPDATE notes SET {', '.join(fields)} WHERE id = ?",
+            tuple(values),
+        )
+        await db.commit()
+        if cursor.rowcount == 0:
+            return None
+    return await get_note(note_id)
+
+
+# --------------------------- Groups -----------------------------------------
+
+
+async def create_group(name: str, parent_id: str | None = None) -> dict:
+    group_id = str(uuid.uuid4())
+    now = datetime.now(timezone.utc).isoformat()
+    group = {
+        "id": group_id,
+        "name": name,
+        "parent_id": parent_id,
+        "created_at": now,
+        "updated_at": now,
+    }
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute(
+            "INSERT INTO groups (id, name, parent_id, created_at, updated_at) "
+            "VALUES (:id, :name, :parent_id, :created_at, :updated_at)",
+            group,
+        )
+        await db.commit()
+    return group
+
+
+async def get_all_groups() -> list:
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        cursor = await db.execute(
+            "SELECT * FROM groups ORDER BY name COLLATE NOCASE"
+        )
+        rows = await cursor.fetchall()
+        return [dict(r) for r in rows]
+
+
+async def get_group(group_id: str) -> dict | None:
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        cursor = await db.execute(
+            "SELECT * FROM groups WHERE id = ?", (group_id,)
+        )
+        row = await cursor.fetchone()
+        return dict(row) if row else None
+
+
+async def update_group(group_id: str, *,
+                       name=_UNSET, parent_id=_UNSET) -> dict | None:
+    """Partial update of a group (rename and/or reparent).
+
+    Pass None for `parent_id` to make a group a top-level group.
+    Self-parenting and circular references are NOT validated here — callers
+    in routes.py should reject those before calling.
+    """
+    fields: list[str] = []
+    values: list = []
+    if name is not _UNSET:
+        fields.append("name = ?")
+        values.append(name)
+    if parent_id is not _UNSET:
+        fields.append("parent_id = ?")
+        values.append(parent_id)
+
+    if not fields:
+        return await get_group(group_id)
+
+    fields.append("updated_at = ?")
+    values.append(datetime.now(timezone.utc).isoformat())
+    values.append(group_id)
+
+    async with aiosqlite.connect(DB_PATH) as db:
+        cursor = await db.execute(
+            f"UPDATE groups SET {', '.join(fields)} WHERE id = ?",
+            tuple(values),
+        )
+        await db.commit()
+        if cursor.rowcount == 0:
+            return None
+    return await get_group(group_id)
+
+
+async def delete_group(group_id: str) -> bool:
+    """Delete a group, orphaning its notes (group_id=NULL) and subgroups
+    (parent_id=NULL). Manual cascade since FKs aren't enforced.
+    """
+    async with aiosqlite.connect(DB_PATH) as db:
+        # Detach notes that were in this group.
+        await db.execute(
+            "UPDATE notes SET group_id = NULL WHERE group_id = ?",
+            (group_id,),
+        )
+        # Promote subgroups to top-level (orphan them to root).
+        await db.execute(
+            "UPDATE groups SET parent_id = NULL WHERE parent_id = ?",
+            (group_id,),
+        )
+        cursor = await db.execute(
+            "DELETE FROM groups WHERE id = ?", (group_id,)
+        )
+        await db.commit()
+        return cursor.rowcount > 0
 
 
 def _row_to_dict(row) -> dict:
@@ -121,5 +291,8 @@ def _row_to_dict(row) -> dict:
     try:
         d["tags"] = json.loads(d.get("tags", "[]"))
     except (json.JSONDecodeError, TypeError):
+        # Legacy rows may store a Python repr or NULL in the tags column;
+        # default to [] silently. Fires on every legacy row read — a log
+        # here would be pure noise.
         d["tags"] = []
     return d

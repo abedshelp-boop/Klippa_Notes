@@ -10,6 +10,7 @@ import ctypes
 import numpy as np
 
 from config import MEDIA_DETECT_THRESHOLD
+from debug import debug
 
 VK_MEDIA_PLAY_PAUSE = 0xB3
 KEYEVENTF_EXTENDEDKEY = 0x0001
@@ -38,20 +39,24 @@ def pause_media_if_playing(ring_buffer) -> bool:
 
         rms = float(np.sqrt(np.mean(audio ** 2)))
         if rms > MEDIA_DETECT_THRESHOLD:
-            print(f"[MediaControl] Audio detected (RMS={rms:.4f}), pausing media.")
+            debug.log(
+                "MediaControl",
+                "audio detected — pausing media",
+                {"rms": rms},
+            )
             _send_media_play_pause()
             return True
 
         return False
-    except Exception as e:
-        print(f"[MediaControl] Failed to check/pause media: {e}")
+    except (OSError, RuntimeError) as e:
+        debug.warn("MediaControl", "failed to check/pause media", e)
         return False
 
 
 def resume_media():
     """Resume media by sending the play/pause key again."""
     try:
-        print("[MediaControl] Resuming media playback.")
+        debug.log("MediaControl", "resuming media playback")
         _send_media_play_pause()
-    except Exception as e:
-        print(f"[MediaControl] Failed to resume media: {e}")
+    except (OSError, RuntimeError) as e:
+        debug.warn("MediaControl", "failed to resume media", e)

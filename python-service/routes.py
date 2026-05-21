@@ -1,10 +1,16 @@
 import asyncio
 import json
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+import os
+from fastapi import FastAPI, File, Form, HTTPException, UploadFile, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
+from openai import APIError as OpenAIAPIError
 
+import ai_client
 import database as db
-import video_context
+import language as language_state
+import target as target_state
+from debug import debug
+from wake_word import get_wake_word_state
 
 app = FastAPI(title="Deen-Notes API")
 
@@ -33,7 +39,8 @@ async def broadcast(message: dict):
     for ws in connected_clients:
         try:
             await ws.send_text(data)
-        except Exception:
+        except (ConnectionError, RuntimeError, WebSocketDisconnect):
+            debug.warn("routes", "WS broadcast send failed — marking disconnected")
             disconnected.append(ws)
     for ws in disconnected:
         connected_clients.remove(ws)
@@ -49,14 +56,43 @@ async def websocket_endpoint(ws: WebSocket):
     await ws.accept()
     connected_clients.append(ws)
     try:
+        # Send the *current* wake-word state on connect — late-joining clients
+        # need this because the broadcast may have fired before they connected
+        # (or before the asyncio loop was even up). Without it, a bubble
+        # opened after wake-word died would silently show "alive".
+        ww = get_wake_word_state()
+        await ws.send_text(json.dumps({
+            "type": "wake_word_state",
+            "status": ww["status"],
+            "error": ww["error"],
+        }))
+        # Late-joining clients also need the current language preference so
+        # the language picker can render its active row without a separate
+        # /language GET round-trip.
+        await ws.send_text(json.dumps({
+            "type": "language",
+            **language_state.get_language(),
+        }))
         await ws.send_text(json.dumps({"type": "status", "status": "listening"}))
         while True:
             await ws.receive_text()
     except WebSocketDisconnect:
+        # Normal client disconnect — cleanup happens in finally:
         pass
     finally:
         if ws in connected_clients:
             connected_clients.remove(ws)
+
+
+@app.get("/health")
+async def health():
+    """Diagnostic endpoint: tells you whether each background subsystem is
+    actually doing its job, vs. having silently failed at startup."""
+    return {
+        "python_pid": os.getpid(),
+        "wake_word": get_wake_word_state(),
+        "ws_clients": len(connected_clients),
+    }
 
 
 @app.get("/notes")
@@ -69,6 +105,24 @@ async def search_notes(q: str = ""):
     if not q.strip():
         return await db.get_all_notes()
     return await db.search_notes(q)
+
+
+@app.get("/notes/list")
+async def list_notes_lightweight():
+    """Lightweight note listing for the picker — id, title, updated_at, group_id.
+    Must be declared BEFORE /notes/{note_id} so FastAPI doesn't capture
+    'list' as a path parameter. group_id is included so the picker tree can
+    nest notes under their parent group in a single round-trip."""
+    notes = await db.get_all_notes()
+    return [
+        {
+            "id": n["id"],
+            "title": n["title"],
+            "updated_at": n["updated_at"],
+            "group_id": n.get("group_id"),
+        }
+        for n in notes
+    ]
 
 
 @app.get("/notes/{note_id}")
@@ -85,6 +139,215 @@ async def delete_note(note_id: str):
     return {"success": success}
 
 
+_UNSET = object()
+
+
+@app.post("/notes")
+async def create_note_route(body: dict):
+    """Create a new empty note (independent of the audio-capture pipeline).
+
+    Body shape:
+      {"title"?: str, "content"?: str, "tags"?: list, "source"?: str,
+       "group_id"?: str | null}
+
+    Broadcasts {"type": "note", "note": ...} on the WS so other windows
+    refresh immediately.
+    """
+    note = await db.create_note(
+        title=(body.get("title") or "Untitled Note"),
+        content=(body.get("content") or ""),
+        tags=(body.get("tags") or []),
+        source=(body.get("source") or ""),
+        group_id=body.get("group_id"),
+    )
+    await broadcast({"type": "note", "note": note})
+    return note
+
+
+@app.put("/notes/{note_id}")
+async def update_note_route(note_id: str, body: dict):
+    """Partial update for a note (title / content / tags / source / group_id).
+
+    Any field omitted from the body is left untouched. Pass `"group_id": null`
+    to detach a note from its group. Broadcasts {"type": "note_updated", ...}
+    so the React UI refreshes via useWebSocket.
+    """
+    kwargs = {}
+    if "title" in body:
+        kwargs["title"] = body["title"]
+    if "content" in body:
+        kwargs["content"] = body["content"]
+    if "tags" in body:
+        kwargs["tags"] = body["tags"]
+    if "source" in body:
+        kwargs["source"] = body["source"]
+    if "group_id" in body:
+        kwargs["group_id"] = body["group_id"]  # may be None to detach
+
+    note = await db.update_note(note_id, **kwargs)
+    if note is None:
+        raise HTTPException(status_code=404, detail="Note not found")
+    await broadcast({"type": "note_updated", "note": note})
+    return note
+
+
+# --------------------------- Groups -----------------------------------------
+
+
+@app.get("/groups")
+async def list_groups():
+    """Return all groups (flat list, ordered by name). Hierarchy is
+    reconstructed client-side from parent_id."""
+    return await db.get_all_groups()
+
+
+@app.post("/groups")
+async def create_group_route(body: dict):
+    """Create a group.
+
+    Body shape: {"name": str, "parent_id"?: str | null}
+    """
+    name = (body.get("name") or "").strip()
+    if not name:
+        raise HTTPException(status_code=400, detail="name is required")
+    parent_id = body.get("parent_id")
+    group = await db.create_group(name=name, parent_id=parent_id)
+    await broadcast({"type": "group_created", "group": group})
+    return group
+
+
+@app.put("/groups/{group_id}")
+async def update_group_route(group_id: str, body: dict):
+    """Rename and/or reparent a group.
+
+    Body shape: {"name"?: str, "parent_id"?: str | null}
+
+    Rejects self-parenting and direct circular references. Doesn't fully
+    walk the chain — a malicious client could still construct a cycle by
+    swapping parents in two requests; we accept that for now (it'd only
+    confuse the tree renderer, not corrupt data).
+    """
+    kwargs = {}
+    if "name" in body:
+        name = (body["name"] or "").strip()
+        if not name:
+            raise HTTPException(status_code=400, detail="name cannot be empty")
+        kwargs["name"] = name
+    if "parent_id" in body:
+        if body["parent_id"] == group_id:
+            raise HTTPException(
+                status_code=400, detail="a group cannot be its own parent"
+            )
+        kwargs["parent_id"] = body["parent_id"]
+
+    group = await db.update_group(group_id, **kwargs)
+    if group is None:
+        raise HTTPException(status_code=404, detail="Group not found")
+    await broadcast({"type": "group_updated", "group": group})
+    return group
+
+
+@app.delete("/groups/{group_id}")
+async def delete_group_route(group_id: str):
+    """Delete a group; orphans child notes (group_id=NULL) and child
+    subgroups (parent_id=NULL). Implemented as a manual cascade in
+    database.delete_group()."""
+    success = await db.delete_group(group_id)
+    if success:
+        await broadcast({"type": "group_deleted", "group_id": group_id})
+    return {"success": success}
+
+
+@app.post("/transcribe-push-to-talk")
+async def transcribe_push_to_talk(
+    file: UploadFile = File(...),
+    mode: str = Form("verbatim"),
+    note_id: str | None = Form(None),
+    append: bool = Form(True),
+):
+    """Transcribe a short mic recording and optionally append it to a note.
+
+    Form fields:
+      file       — WAV audio blob recorded in the renderer (mono, 16kHz preferred)
+      mode       — "verbatim" (aggressive cleanup) or "rewrite" (AI restructure)
+      note_id    — target note to append to (required when append=true)
+      append     — when true (default), append the polished text to the note
+                   and broadcast `note_updated`. When false, just return the
+                   transcript so the caller can do something else with it.
+
+    Returns: {"text": <polished_markdown>, "raw": <raw_transcript>,
+             "appended_to": <note_id_or_null>, "mode": <mode>}
+    """
+    if mode not in ("verbatim", "rewrite"):
+        raise HTTPException(status_code=400, detail="mode must be 'verbatim' or 'rewrite'")
+
+    wav_bytes = await file.read()
+    if not wav_bytes:
+        raise HTTPException(status_code=400, detail="empty audio file")
+
+    # Stage 1: raw transcription. Reuse the same Whisper path as the wake-word
+    # command pipeline (single-speaker, language-agnostic).
+    try:
+        raw_text = await asyncio.to_thread(
+            ai_client.transcribe_audio, wav_bytes, False
+        )
+    except (OSError, RuntimeError, ValueError, OpenAIAPIError) as e:
+        debug.error("routes", "dictation transcribe failed", e)
+        raise HTTPException(
+            status_code=500, detail=f"transcription failed: {e}"
+        ) from e
+    raw_text = (raw_text or "").strip()
+    if not raw_text:
+        return {"text": "", "raw": "", "appended_to": None, "mode": mode}
+
+    # Stage 2: polish via the chosen mode. The user picked "verbatim" or
+    # "rewrite" in the two-button mic panel BEFORE recording (matches the
+    # "explicit user control" preference from CLAUDE.md).
+    lang = language_state.get_language()
+    target_code = lang.get("code") if lang else None
+    target_label = lang.get("label") if lang else None
+    try:
+        if mode == "verbatim":
+            polished = await asyncio.to_thread(
+                ai_client.polish_verbatim_aggressive,
+                raw_text, target_code, target_label,
+            )
+        else:  # "rewrite"
+            polished = await asyncio.to_thread(
+                ai_client.rewrite_dictation,
+                raw_text, target_code, target_label,
+            )
+    except (OSError, RuntimeError, ValueError, OpenAIAPIError) as e:
+        debug.error("routes", "dictation polish failed", e)
+        raise HTTPException(
+            status_code=500, detail=f"polish failed: {e}"
+        ) from e
+
+    polished = (polished or raw_text).strip()
+    appended_to = None
+    if append:
+        if not note_id:
+            raise HTTPException(
+                status_code=400,
+                detail="append=true requires note_id",
+            )
+        # Soft separator (\n\n) for dictation appends — not a horizontal rule.
+        # The append_to_note default still produces a `---` divider for
+        # capture-pipeline writes; we override it here.
+        updated = await db.append_to_note(note_id, polished, separator="\n\n")
+        if updated is None:
+            raise HTTPException(status_code=404, detail="Note not found")
+        appended_to = note_id
+        await broadcast({"type": "note_updated", "note": updated})
+
+    return {
+        "text": polished,
+        "raw": raw_text,
+        "appended_to": appended_to,
+        "mode": mode,
+    }
+
+
 @app.post("/trigger")
 async def trigger_note():
     """Trigger note capture via keyboard shortcut or UI button."""
@@ -95,22 +358,81 @@ async def trigger_note():
     return {"success": False, "message": "Trigger callback not set"}
 
 
-@app.post("/video-context")
-async def update_video_context(body: dict):
-    """Receive current video info from the Chrome extension."""
-    title = body.get("title")
-    url = body.get("url")
-    if title and url:
-        video_context.set_video(title, url)
+async def _target_payload() -> dict:
+    """Build the WebSocket / HTTP target payload. Includes the target note's
+    title (resolved live from the DB) so the bubble label can render without
+    a separate fetch. Falls back to None on title if the note was deleted."""
+    state = target_state.get_target()
+    title = None
+    if state["note_id"]:
+        note = await db.get_note(state["note_id"])
+        if note is None:
+            # Target note was deleted while pinned — reset to default.
+            target_state.clear_target()
+            state = target_state.get_target()
+        else:
+            title = note["title"]
+    return {
+        "type": "target",
+        "note_id": state["note_id"],
+        "create_new_pending": state["create_new_pending"],
+        "title": title,
+    }
+
+
+@app.get("/target")
+async def get_target():
+    """Return the current note routing target for the bubble + picker."""
+    return await _target_payload()
+
+
+@app.post("/target")
+async def set_target(body: dict):
+    """Update the routing target.
+
+    Body shapes:
+      {"note_id": "<id>"}                        -> pin to existing note
+      {"note_id": null, "create_new_pending": true}  -> create new on next capture
+      {"note_id": null}                          -> clear target (default behavior)
+    """
+    note_id = body.get("note_id")
+    create_new_pending = bool(body.get("create_new_pending", False))
+
+    if note_id:
+        target_state.set_target(note_id)
+    elif create_new_pending:
+        target_state.set_create_new_pending()
     else:
-        video_context.clear_video()
-    return {"success": True}
+        target_state.clear_target()
+
+    payload = await _target_payload()
+    await broadcast(payload)
+    return payload
 
 
-@app.get("/video-context")
-async def get_video_context():
-    """Return the currently detected video (if any)."""
-    return video_context.get_video() or {"title": None, "url": None}
+@app.get("/language")
+async def get_language_route():
+    """Return the current output-language preference for the picker."""
+    return language_state.get_language()
+
+
+@app.post("/language")
+async def set_language_route(body: dict):
+    """Update the output-language preference.
+
+    Body shape:
+      {"code": "<iso>", "label": "<display>", "emoji": "<single-char>"}
+      {"code": "auto", "label": "Global", "emoji": "🌍"}  -> back to default
+
+    Re-broadcasts to WS so any other window tracking the choice updates
+    immediately.
+    """
+    code = (body.get("code") or "auto").strip() or "auto"
+    label = (body.get("label") or "Global").strip() or "Global"
+    emoji = (body.get("emoji") or "\U0001F30D").strip() or "\U0001F30D"
+    new_state = language_state.set_language(code, label, emoji)
+    await broadcast({"type": "language", **new_state})
+    return new_state
 
 
 @app.get("/settings")

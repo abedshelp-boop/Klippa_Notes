@@ -30,6 +30,7 @@ from config import (
     VAD_SPEECH_PAD_MS,
     VAD_THRESHOLD,
 )
+from debug import debug
 
 
 # Lazy model handle. load_silero_vad() caches the model file in the Silero
@@ -68,7 +69,11 @@ def extract_speech(
     if sample_rate not in (8000, 16000):
         # Shouldn't happen — our pipeline is locked to 16 kHz — but bail
         # safely rather than silently corrupting audio.
-        print(f"[VAD] Unsupported sample_rate={sample_rate}, returning audio unchanged.")
+        debug.warn(
+            "VAD",
+            "unsupported sample_rate, returning audio unchanged",
+            {"sample_rate": sample_rate},
+        )
         return audio
 
     model = _get_model()
@@ -87,7 +92,7 @@ def extract_speech(
 
     total_sec = len(audio) / sample_rate
     if not segments:
-        print(f"[VAD] No speech detected in {total_sec:.1f}s of audio.")
+        debug.log("VAD", "no speech detected", {"total_sec": total_sec})
         return np.zeros(0, dtype=np.float32)
 
     speech = np.concatenate(
@@ -102,9 +107,15 @@ def extract_speech(
 
     speech_sec = len(speech) / sample_rate
     pct = (speech_sec / total_sec * 100.0) if total_sec > 0 else 0.0
-    note = " (truncated to budget)" if truncated else ""
-    print(
-        f"[VAD] {len(segments)} speech segment(s): kept {speech_sec:.1f}s "
-        f"of speech from {total_sec:.1f}s of audio ({pct:.0f}%){note}"
+    debug.log(
+        "VAD",
+        "speech segments kept",
+        {
+            "segments": len(segments),
+            "kept_sec": speech_sec,
+            "total_sec": total_sec,
+            "pct": pct,
+            "truncated": truncated,
+        },
     )
     return speech
