@@ -60,7 +60,7 @@ function writeAppState() {
   try {
     fs.writeFileSync(appStatePath(), JSON.stringify(appState, null, 2), 'utf8');
   } catch (err) {
-    console.error('[State] Failed to persist:', err.message);
+    debug.error('State', 'failed to persist', err.message);
   }
 }
 
@@ -311,13 +311,13 @@ async function restoreTargetToPython() {
   for (let i = 0; i < 20; i++) {
     try {
       await pythonRequest('POST', '/target', target);
-      console.log('[Target] Restored to Python:', target);
+      debug.log('Target', 'restored to Python', target);
       return;
     } catch (err) {
       await new Promise((r) => setTimeout(r, 750));
     }
   }
-  console.warn('[Target] Failed to restore target — Python never came up.');
+  debug.warn('Target', 'failed to restore — Python never came up');
 }
 
 // Mirrors restoreTargetToPython: re-asserts the persisted language to the
@@ -329,13 +329,13 @@ async function restoreLanguageToPython() {
   for (let i = 0; i < 20; i++) {
     try {
       await pythonRequest('POST', '/language', lang);
-      console.log('[Language] Restored to Python:', lang);
+      debug.log('Language', 'restored to Python', lang);
       return;
     } catch (err) {
       await new Promise((r) => setTimeout(r, 750));
     }
   }
-  console.warn('[Language] Failed to restore — Python never came up.');
+  debug.warn('Language', 'failed to restore — Python never came up');
 }
 
 function createBubbleWindow() {
@@ -474,12 +474,12 @@ function triggerNoteCapture() {
     let body = '';
     res.on('data', (chunk) => { body += chunk; });
     res.on('end', () => {
-      console.log('[Trigger] Response:', body);
+      debug.log('Trigger', 'response', body);
     });
   });
 
   req.on('error', (err) => {
-    console.error('[Trigger] Failed - Python service not ready:', err.message);
+    debug.error('Trigger', 'python service not ready', err.message);
   });
 
   req.write(postData);
@@ -488,7 +488,7 @@ function triggerNoteCapture() {
 
 function registerGlobalShortcut() {
   globalShortcut.register('CommandOrControl+Shift+N', () => {
-    console.log('[Shortcut] Ctrl+Shift+N pressed - triggering note capture');
+    debug.log('Shortcut', 'Ctrl+Shift+N pressed — triggering capture');
     triggerNoteCapture();
     if (mainWindow) {
       mainWindow.show();
@@ -507,7 +507,7 @@ function openPythonLogStream() {
   try { if (fs.existsSync(logPath)) fs.renameSync(logPath, prevPath); } catch {}
   const stream = fs.createWriteStream(logPath, { flags: 'a' });
   stream.write(`\n===== python service started ${new Date().toISOString()} =====\n`);
-  console.log('[Python] Log file:', logPath);
+  debug.log('Python', 'log file', logPath);
   return stream;
 }
 
@@ -526,7 +526,7 @@ function startPythonService() {
   const pythonPath = path.join(pyDir, 'venv', 'Scripts', 'python.exe');
   const scriptPath = path.join(pyDir, 'main.py');
 
-  console.log('[Python] Starting:', pythonPath, scriptPath);
+  debug.log('Python', 'starting', pythonPath, scriptPath);
 
   if (!pythonLogStream) pythonLogStream = openPythonLogStream();
 
@@ -544,26 +544,26 @@ function startPythonService() {
 
   pythonProcess.stdout.on('data', (data) => {
     const text = data.toString();
-    console.log(`[Python] ${text.trimEnd()}`);
+    debug.log('Python', text.trimEnd());
     pythonLogStream?.write(text);
   });
 
   pythonProcess.stderr.on('data', (data) => {
     const text = data.toString();
-    console.error(`[Python ERROR] ${text.trimEnd()}`);
+    debug.error('Python', text.trimEnd());
     pythonLogStream?.write(`[stderr] ${text}`);
   });
 
   pythonProcess.on('error', (err) => {
-    console.error(`[Python] Failed to start: ${err.message}`);
+    debug.error('Python', 'failed to start', err.message);
     pythonLogStream?.write(`[spawn-error] ${err.message}\n`);
   });
 
   pythonProcess.on('close', (code) => {
-    console.log(`[Python] Process exited with code ${code}`);
+    debug.log('Python', 'process exited', { code });
     pythonLogStream?.write(`[exit] code=${code}\n`);
     if (code !== 0 && !app.isQuitting) {
-      console.log('[Python] Restarting in 3 seconds...');
+      debug.log('Python', 'restarting in 3s');
       setTimeout(startPythonService, 3000);
     }
   });
@@ -615,7 +615,7 @@ ipcMain.handle('picker:list-notes', async () => {
   try {
     return await pythonRequest('GET', '/notes/list', null);
   } catch (err) {
-    console.error('[Picker] list-notes failed:', err.message);
+    debug.error('Picker', 'list-notes failed', err.message);
     return [];
   }
 });
@@ -629,7 +629,7 @@ ipcMain.handle('picker:tree', async () => {
     ]);
     return { notes: notes || [], groups: groups || [] };
   } catch (err) {
-    console.error('[Picker] tree fetch failed:', err.message);
+    debug.error('Picker', 'tree fetch failed', err.message);
     return { notes: [], groups: [] };
   }
 });
@@ -649,7 +649,7 @@ ipcMain.handle('picker:select', async (_e, noteId) => {
   try {
     await pythonRequest('POST', '/target', body);
   } catch (err) {
-    console.error('[Picker] select POST failed:', err.message);
+    debug.error('Picker', 'select POST failed', err.message);
   }
   hidePicker();
 });
@@ -661,7 +661,7 @@ ipcMain.handle('picker:create-new', async () => {
   try {
     await pythonRequest('POST', '/target', body);
   } catch (err) {
-    console.error('[Picker] create-new POST failed:', err.message);
+    debug.error('Picker', 'create-new POST failed', err.message);
   }
   hidePicker();
 });
@@ -677,7 +677,7 @@ ipcMain.handle('picker:create-empty-note', async () => {
       content: '',
     });
   } catch (err) {
-    console.error('[Picker] create-empty-note POST failed:', err.message);
+    debug.error('Picker', 'create-empty-note POST failed', err.message);
     return null;
   }
   if (!newNote?.id) {
@@ -692,7 +692,7 @@ ipcMain.handle('picker:create-empty-note', async () => {
       create_new_pending: false,
     });
   } catch (err) {
-    console.error('[Picker] set-target after create-empty-note failed:', err.message);
+    debug.error('Picker', 'set-target after create-empty-note failed', err.message);
   }
   hidePicker();
   // Surface the main window and open the new note in edit mode.
@@ -734,7 +734,7 @@ ipcMain.handle('lang-picker:select', async (_e, payload) => {
   try {
     await pythonRequest('POST', '/language', lang);
   } catch (err) {
-    console.error('[Lang Picker] select POST failed:', err.message);
+    debug.error('LangPicker', 'select POST failed', err.message);
   }
   hideLangPicker();
 });
