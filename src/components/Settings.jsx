@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react';
+import { debug } from '../lib/debug';
 
 const API_URL = 'http://localhost:8765';
 
@@ -41,7 +42,7 @@ export default function Settings({ onClose }) {
       });
       onClose();
     } catch (err) {
-      console.error('[Settings] Save failed:', err);
+      debug.error('Settings', 'save failed', err);
     } finally {
       setSaving(false);
     }

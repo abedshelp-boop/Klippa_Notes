@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import { debug } from '../lib/debug';
 
 const STORAGE_KEY = 'deen.overlay.v1';
 
@@ -35,7 +36,7 @@ export default function useNoteOverlay() {
     try {
       localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
     } catch (err) {
-      console.warn('[overlay] persist failed', err);
+      debug.warn('overlay', 'persist failed', err);
     }
   }, [state]);
 

@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
+import { debug } from '../lib/debug';
 
 const WS_URL = 'ws://localhost:8765/ws';
 const RECONNECT_DELAY = 3000;
@@ -44,7 +45,7 @@ export default function useWebSocket(onNote, onNoteUpdated) {
               onNoteUpdatedRef.current?.(message.note);
             }
           } catch (err) {
-            console.error('[WS] Parse error:', err);
+            debug.error('WS', 'parse error', err);
           }
         };
 

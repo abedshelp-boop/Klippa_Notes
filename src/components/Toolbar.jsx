@@ -1,8 +1,7 @@
 import React from 'react';
 import { IconSearch } from './Icons';
-import WindowChrome from './WindowChrome';
 
-export default function Toolbar({ query, onQueryChange }) {
+export default function Toolbar({ query, onQueryChange, onCreateNote }) {
   const ctrlKey = typeof navigator !== 'undefined' && /Mac/i.test(navigator.platform) ? '⌘' : 'Ctrl';
   return (
     <div className="toolbar">
@@ -18,7 +17,19 @@ export default function Toolbar({ query, onQueryChange }) {
         <span className="kbd">{ctrlKey} K</span>
       </label>
       <div className="toolbar-spacer" />
-      <WindowChrome />
+      {onCreateNote && (
+        <button
+          type="button"
+          className="toolbar-new-btn"
+          onClick={onCreateNote}
+          title="Create a new empty note"
+        >
+          + New
+        </button>
+      )}
+      {/* Phase 5: WindowChrome moved out of the toolbar — it now floats
+          at top:0 right:0 of the viewport. The toolbar pads the right
+          edge so search + "+ New" never collide with the chrome. */}
     </div>
   );
 }

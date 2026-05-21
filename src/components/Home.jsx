@@ -1,4 +1,4 @@
-import React, { useMemo } from 'react';
+import React, { useMemo, useRef, useState } from 'react';
 import { IconArrowRight, IconPin, IconTrash, IconRestore, IconArchive } from './Icons';
 import NoteMenu from './NoteMenu';
 
@@ -60,12 +60,34 @@ function NoteCard({
   onRestore,
   onDeletePermanently,
   onEdit,
+  onMoveToGroup,
+  onRenameInline,
 }) {
   const displayTitle = titleOverride || note.title || 'Untitled Note';
   const subtitle = note.subtitle || extractSubtitle(note.content);
   const wordCount = note.word_count ?? countWords(note.content);
   const blockCount = note.block_count ?? countBlocks(note.content);
   const dateLabel = formatRelative(note.created_at || note.updated_at);
+
+  // Phase 11: inline rename on title double-click.
+  const [renaming, setRenaming] = useState(false);
+  const [draft, setDraft] = useState('');
+  const inputRef = useRef(null);
+
+  const startRename = (e) => {
+    if (!onRenameInline) return;
+    e.stopPropagation();
+    setDraft(displayTitle);
+    setRenaming(true);
+    setTimeout(() => inputRef.current?.select(), 10);
+  };
+
+  const commitRename = () => {
+    const trimmed = draft.trim();
+    setRenaming(false);
+    if (!trimmed || trimmed === note.title) return;
+    onRenameInline?.(note.id, trimmed);
+  };
 
   return (
     <div
@@ -88,7 +110,30 @@ function NoteCard({
         <span className="note-card-date">{dateLabel}</span>
       </div>
 
-      <div className="note-card-title">{displayTitle}</div>
+      {renaming ? (
+        <input
+          ref={inputRef}
+          className="note-card-title note-card-title-input"
+          value={draft}
+          onChange={(e) => setDraft(e.target.value)}
+          onClick={(e) => e.stopPropagation()}
+          onBlur={commitRename}
+          onKeyDown={(e) => {
+            e.stopPropagation();
+            if (e.key === 'Enter') { e.preventDefault(); commitRename(); }
+            if (e.key === 'Escape') { e.preventDefault(); setRenaming(false); }
+          }}
+          maxLength={200}
+        />
+      ) : (
+        <div
+          className="note-card-title"
+          onDoubleClick={startRename}
+          title={onRenameInline ? 'Double-click to rename' : undefined}
+        >
+          {displayTitle}
+        </div>
+      )}
       <div className="note-card-subtitle">{subtitle || 'No preview available'}</div>
 
       <div className="note-card-footer">
@@ -144,6 +189,7 @@ function NoteCard({
             onTrash={onTrash}
             onRestore={onRestore}
             onDeletePermanently={onDeletePermanently}
+            onMoveToGroup={onMoveToGroup}
             size="sm"
             align="right"
           />
@@ -198,6 +244,9 @@ export default function Home({
   overlay,
   onEditNote,
   onDeletePermanently,
+  onCreateNote,
+  onMoveToGroup,
+  onRenameNote,
 }) {
   const allTags = useMemo(() => {
     const counts = new Map();
@@ -247,8 +296,17 @@ export default function Home({
         {filter.type !== 'archive' && (
           <div className="home-subhead">
             <span>
-              Say <span className="kbd">"Hey Deen"</span> to start dictating.
+              Say <span className="kbd">"Hey Deen"</span> to start dictating, or
             </span>
+            {onCreateNote && (
+              <button
+                type="button"
+                className="home-new-note-btn"
+                onClick={onCreateNote}
+              >
+                + Write a new note
+              </button>
+            )}
           </div>
         )}
       </div>
@@ -296,6 +354,8 @@ export default function Home({
               onRestore={() => overlay.restoreNote(n.id)}
               onDeletePermanently={() => onDeletePermanently(n.id)}
               onEdit={() => onEditNote(n.id)}
+              onMoveToGroup={onMoveToGroup ? () => onMoveToGroup(n.id) : undefined}
+              onRenameInline={onRenameNote}
             />
           ))}
         </div>

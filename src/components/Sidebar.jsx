@@ -5,6 +5,8 @@ import {
   IconArchive,
   IconHash,
 } from './Icons';
+import GroupTree from './GroupTree';
+import logoUrl from '../../assets/logo.svg';
 
 const STATUS_LABELS = {
   listening: 'MIC READY · EN-US',
@@ -23,6 +25,11 @@ export default function Sidebar({
   status,
   capturing,
   overlay,
+  onCreateNote,
+  groups = [],
+  onCreateGroup,
+  onRenameGroup,
+  onDeleteGroup,
 }) {
   const ctrlKey = typeof navigator !== 'undefined' && /Mac/i.test(navigator.platform) ? '⌘' : 'Ctrl';
 
@@ -62,7 +69,7 @@ export default function Sidebar({
   return (
     <aside className="sidebar">
       <div className="sidebar-brand">
-        <div className="brand-orb" />
+        <img src={logoUrl} className="brand-orb" alt="" draggable={false} />
         <div>
           <div className="brand-text-main">Deen<em>-notes</em></div>
           <div className="brand-text-sub">V 1.0 · {status === 'disconnected' || status === 'error' ? 'OFFLINE' : 'ONLINE'}</div>
@@ -80,6 +87,17 @@ export default function Sidebar({
         </span>
         <span className="kbd">{ctrlKey} D</span>
       </button>
+
+      {onCreateNote && (
+        <button
+          className="sidebar-new-note"
+          onClick={onCreateNote}
+          title="Create a new empty note"
+        >
+          <span className="sidebar-new-note-icon">+</span>
+          <span className="sidebar-new-note-label">New note</span>
+        </button>
+      )}
 
       <div className="sidebar-header">Library</div>
       <button
@@ -106,6 +124,34 @@ export default function Sidebar({
         <span className="sidebar-item-label">Archive</span>
         <span className="sidebar-item-count">{archivedCount}</span>
       </button>
+
+      <div className="sidebar-header sidebar-header-row">
+        <span>Groups</span>
+        {onCreateGroup && (
+          <button
+            type="button"
+            className="sidebar-header-btn"
+            onClick={async () => {
+              const name = window.prompt('New group name', '');
+              if (name && name.trim()) await onCreateGroup(name.trim(), null);
+            }}
+            title="Create a new top-level group"
+            aria-label="Create group"
+          >
+            +
+          </button>
+        )}
+      </div>
+
+      <GroupTree
+        groups={groups}
+        notes={notes}
+        activeGroupId={filter.type === 'group' ? filter.value : null}
+        onSelectGroup={(id) => onFilterChange({ type: 'group', value: id })}
+        onCreateGroup={onCreateGroup}
+        onRenameGroup={onRenameGroup}
+        onDeleteGroup={onDeleteGroup}
+      />
 
       {overlay.allUserTags.length > 0 && (
         <>

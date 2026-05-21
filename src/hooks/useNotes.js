@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
+import { debug } from '../lib/debug';
 
 const API_URL = 'http://localhost:8765';
 const MAX_RETRIES = 10;
@@ -18,7 +19,7 @@ export default function useNotes() {
         return true;
       }
     } catch {
-      console.log('[Notes] Backend not available yet');
+      debug.log('Notes', 'backend not available yet');
     }
     return false;
   }, []);
@@ -41,13 +42,73 @@ export default function useNotes() {
   }, [fetchNotes]);
 
   const addNote = useCallback((note) => {
-    setNotes((prev) => [note, ...prev]);
+    setNotes((prev) => {
+      // De-dup in case the WS broadcast lands before this hook's caller adds.
+      if (prev.some((n) => n.id === note.id)) return prev;
+      return [note, ...prev];
+    });
   }, []);
 
   const updateNote = useCallback((updated) => {
     setNotes((prev) =>
       prev.map((n) => (n.id === updated.id ? updated : n))
     );
+  }, []);
+
+  /**
+   * Create a new note on the server (independent of the audio pipeline).
+   * Returns the new note dict on success or null on failure.
+   * The WebSocket will also broadcast the same note shortly after — the
+   * de-dup in addNote prevents double-insert.
+   */
+  const createNoteOnServer = useCallback(async (initial = {}) => {
+    try {
+      const res = await fetch(`${API_URL}/notes`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(initial),
+      });
+      if (!res.ok) {
+        debug.error('Notes', 'create failed', res.status);
+        return null;
+      }
+      const note = await res.json();
+      setNotes((prev) => {
+        if (prev.some((n) => n.id === note.id)) return prev;
+        return [note, ...prev];
+      });
+      return note;
+    } catch (err) {
+      debug.error('Notes', 'create failed', err);
+      return null;
+    }
+  }, []);
+
+  /**
+   * Patch a note on the server. Patch keys: title, content, tags, source,
+   * group_id (null detaches from a group). Returns the updated note dict on
+   * success or null on failure.
+   */
+  const updateNoteOnServer = useCallback(async (id, patch) => {
+    try {
+      const res = await fetch(`${API_URL}/notes/${id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(patch),
+      });
+      if (!res.ok) {
+        debug.error('Notes', 'update failed', res.status);
+        return null;
+      }
+      const note = await res.json();
+      setNotes((prev) =>
+        prev.map((n) => (n.id === note.id ? note : n))
+      );
+      return note;
+    } catch (err) {
+      debug.error('Notes', 'update failed', err);
+      return null;
+    }
   }, []);
 
   const deleteNote = useCallback(async (id) => {
@@ -58,7 +119,7 @@ export default function useNotes() {
         return true;
       }
     } catch (err) {
-      console.error('[Notes] Delete failed:', err);
+      debug.error('Notes', 'delete failed', err);
     }
     return false;
   }, []);
@@ -74,9 +135,19 @@ export default function useNotes() {
         setNotes(data);
       }
     } catch (err) {
-      console.error('[Notes] Search failed:', err);
+      debug.error('Notes', 'search failed', err);
     }
   }, [fetchNotes]);
 
-  return { notes, loading, addNote, updateNote, deleteNote, searchNotes, refetch: fetchNotes };
+  return {
+    notes,
+    loading,
+    addNote,
+    updateNote,
+    deleteNote,
+    searchNotes,
+    refetch: fetchNotes,
+    createNoteOnServer,
+    updateNoteOnServer,
+  };
 }

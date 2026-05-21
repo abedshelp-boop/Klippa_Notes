@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { IconMore, IconPin, IconEdit, IconTrash, IconRestore, IconArchive } from './Icons';
+import { IconMore, IconPin, IconEdit, IconTrash, IconRestore, IconArchive, IconFolder } from './Icons';
 
 export default function NoteMenu({
   isPinned,
@@ -9,6 +9,7 @@ export default function NoteMenu({
   onTrash,
   onRestore,
   onDeletePermanently,
+  onMoveToGroup,
   align = 'right',
   size = 'sm',
 }) {
@@ -64,6 +65,15 @@ export default function NoteMenu({
                 >
                   <IconEdit size={14} stroke={1.6} />
                   <span>Rename</span>
+                </button>
+              )}
+              {onMoveToGroup && (
+                <button
+                  className="note-menu-item"
+                  onClick={() => { close(); onMoveToGroup(); }}
+                >
+                  <IconFolder size={14} stroke={1.5} />
+                  <span>Move to group…</span>
                 </button>
               )}
               <div className="note-menu-divider" />

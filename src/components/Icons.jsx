@@ -74,6 +74,31 @@ export const IconChevronLeft = (p) => (
   </Icon>
 );
 
+export const IconChevronRight = (p) => (
+  <Icon {...p}>
+    <path d="m9 18 6-6-6-6" />
+  </Icon>
+);
+
+export const IconChevronDown = (p) => (
+  <Icon {...p}>
+    <path d="m6 9 6 6 6-6" />
+  </Icon>
+);
+
+export const IconFolder = (p) => (
+  <Icon {...p}>
+    <path d="M4 7a2 2 0 0 1 2-2h4l2 2h6a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V7Z" />
+  </Icon>
+);
+
+export const IconFolderOpen = (p) => (
+  <Icon {...p}>
+    <path d="M4 7a2 2 0 0 1 2-2h4l2 2h6a2 2 0 0 1 2 2v1H4V7Z" />
+    <path d="m4 9 1.5 7a2 2 0 0 0 2 1.6h9a2 2 0 0 0 2-1.6L20 9H4Z" />
+  </Icon>
+);
+
 export const IconDots = (p) => (
   <Icon {...p}>
     <circle cx="5" cy="12" r="1" />

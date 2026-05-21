@@ -1,5 +1,6 @@
 import React, { useState, useCallback } from 'react';
 import NoteCard from './NoteCard';
+import { debug } from '../lib/debug';
 
 const API_URL = 'http://localhost:8765';
 
@@ -22,7 +23,7 @@ export default function NoteList({ notes, activeNoteId, onSelectNote, onSearch, 
         await fetch(`${API_URL}/trigger`, { method: 'POST' });
       }
     } catch (err) {
-      console.error('Trigger failed:', err);
+      debug.error('NoteList', 'trigger failed', err);
     }
     setTimeout(() => setCapturing(false), 3000);
   }, []);
