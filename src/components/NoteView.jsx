@@ -19,6 +19,12 @@ import TagEditor from './TagEditor';
 import MermaidBlock from './MermaidBlock';
 import ChartBlock from './ChartBlock';
 import useMicRecorder from '../hooks/useMicRecorder';
+import {
+  DICTATION_MODE,
+  HOTKEY_LABEL,
+  pickDictationMode,
+  sayConfirmation,
+} from '../lib/dictation-modifiers';
 
 const API_URL = 'http://localhost:8765';
 
@@ -103,14 +109,16 @@ export default function NoteView({
   const [editingBody, setEditingBody] = useState(false);
   const [bodyDraft, setBodyDraft] = useState('');
 
-  // Phase 7: push-to-talk dictation state.
-  //   dictationMode === null  → mode-picker shown (Verbatim / AI Rewrite)
-  //   dictationMode === 'verbatim' | 'rewrite' → armed, mic button + hotkey live
-  const [dictationMode, setDictationMode] = useState(null);
+  // Sub-project 4: the dictation mic is always armed in rewrite mode.
+  // Verbatim survives as a modifier — Shift+Ctrl+Space, or a "quote:" /
+  // "verbatim:" voice prefix handled server-side. The ref carries the mode
+  // chosen at press-time so stopAndUpload reads the right value without
+  // needing the keydown handler to re-bind.
   const [isUploading, setIsUploading] = useState(false);
   const [dictationError, setDictationError] = useState(null);
   const editingBodyRef = useRef(false);
   const bodyDraftRef = useRef('');
+  const dictationModeRef = useRef(DICTATION_MODE.REWRITE);
   const mic = useMicRecorder();
 
   useEffect(() => {
@@ -131,9 +139,9 @@ export default function NoteView({
     setTitleDraft('');
     setEditingBody(false);
     setBodyDraft('');
-    setDictationMode(null);
     setIsUploading(false);
     setDictationError(null);
+    dictationModeRef.current = DICTATION_MODE.REWRITE;
   }, [note?.id]);
 
   // Keep refs in sync so hotkey handlers can read the latest value without
@@ -212,10 +220,11 @@ export default function NoteView({
     e.target.style.height = `${e.target.scrollHeight}px`;
   };
 
-  // -------- Phase 7: push-to-talk dictation ---------
+  // -------- Sub-project 4: push-to-talk dictation ---------
 
-  const startDictation = useCallback(async () => {
+  const startDictation = useCallback(async (mode) => {
     if (mic.isRecording || isUploading) return;
+    dictationModeRef.current = mode || DICTATION_MODE.REWRITE;
     setDictationError(null);
     const ok = await mic.start();
     if (!ok) {
@@ -232,14 +241,16 @@ export default function NoteView({
       // No samples captured — user pressed-and-released too fast.
       return;
     }
-    if (!dictationMode || !note?.id) return;
+    if (!note?.id) return;
+
+    const mode = dictationModeRef.current || DICTATION_MODE.REWRITE;
 
     setIsUploading(true);
     setDictationError(null);
     try {
       const form = new FormData();
       form.append('file', blob, 'dictation.wav');
-      form.append('mode', dictationMode);
+      form.append('mode', mode);
       // If the body editor is open we apply locally so the user doesn't
       // lose their in-progress edits; otherwise let the server append and
       // the WS broadcast refresh the note.
@@ -270,28 +281,29 @@ export default function NoteView({
       // Otherwise the server already appended + broadcast `note_updated`,
       // which the useWebSocket hook routes through handleNoteUpdated →
       // updateNote, refreshing the visible note without us doing anything.
+
+      // Fire-and-forget hear-back so hands-free use confirms the save
+      // without needing to look at the screen.
+      sayConfirmation(displayTitle);
     } catch (err) {
       debug.error('Dictation', 'upload failed', err);
       setDictationError('Network error — is the Python service running?');
     } finally {
       setIsUploading(false);
     }
-  }, [mic, dictationMode, note?.id]);
+  }, [mic, note?.id, displayTitle]);
 
   const cancelDictation = useCallback(async () => {
     if (mic.isRecording) {
       await mic.stop(); // discard
     }
-    setDictationMode(null);
     setDictationError(null);
   }, [mic]);
 
-  // Ctrl+Space (or Cmd+Space) push-to-talk while armed. Scoped to NoteView,
-  // suppressed when the title input or body textarea has focus so the user
-  // can still type normally.
+  // Push-to-talk hotkeys: Ctrl+Space = rewrite, Shift+Ctrl+Space = verbatim.
+  // Suppressed when the title input or body textarea has focus so plain
+  // typing still works. Always live now that the mode-picker is gone.
   useEffect(() => {
-    if (!dictationMode) return;
-
     const isInTextField = () => {
       const el = document.activeElement;
       if (!el) return false;
@@ -306,13 +318,13 @@ export default function NoteView({
     let downActive = false;
 
     const onDown = (e) => {
-      if (e.code !== 'Space') return;
-      if (!(e.ctrlKey || e.metaKey)) return;
+      const mode = pickDictationMode(e);
+      if (!mode) return;
       if (isInTextField()) return;
       if (downActive) return; // ignore key auto-repeat
       e.preventDefault();
       downActive = true;
-      startDictation();
+      startDictation(mode);
     };
 
     const onUp = (e) => {
@@ -329,7 +341,7 @@ export default function NoteView({
       window.removeEventListener('keydown', onDown);
       window.removeEventListener('keyup', onUp);
     };
-  }, [dictationMode, startDictation, stopAndUpload]);
+  }, [startDictation, stopAndUpload]);
 
   return (
     <div className="note-view">
@@ -450,66 +462,36 @@ export default function NoteView({
 
           {!isTrashed && (
             <div className="dictation-panel">
-              {dictationMode === null ? (
-                <>
-                  <span className="dictation-label">Dictate</span>
-                  <button
-                    type="button"
-                    className="dictation-mode-btn"
-                    onClick={() => setDictationMode('verbatim')}
-                    title="Cleanup filler & punctuation, keep your exact words"
-                    disabled={isUploading}
-                  >
-                    Verbatim
-                  </button>
-                  <button
-                    type="button"
-                    className="dictation-mode-btn"
-                    onClick={() => setDictationMode('rewrite')}
-                    title="Let AI restructure and explain your dictation"
-                    disabled={isUploading}
-                  >
-                    AI Rewrite
-                  </button>
-                  {isUploading && (
-                    <span className="dictation-spinner-row">
-                      <span className="dictation-spinner" />
-                      <span className="dictation-status">Transcribing…</span>
-                    </span>
-                  )}
-                </>
-              ) : (
-                <>
-                  <button
-                    type="button"
-                    className={`dictation-mic-btn ${mic.isRecording ? 'recording' : ''}`}
-                    onMouseDown={startDictation}
-                    onMouseUp={stopAndUpload}
-                    onMouseLeave={mic.isRecording ? stopAndUpload : undefined}
-                    onTouchStart={(e) => { e.preventDefault(); startDictation(); }}
-                    onTouchEnd={(e) => { e.preventDefault(); stopAndUpload(); }}
-                    disabled={isUploading}
-                    aria-label="Hold to dictate"
-                  >
-                    <span className="dictation-mic-dot" />
-                    <span className="dictation-mic-label">
-                      {mic.isRecording
-                        ? 'Recording… release to insert'
-                        : isUploading
-                          ? 'Transcribing…'
-                          : `Hold Ctrl+Space or this button (${dictationMode})`}
-                    </span>
-                  </button>
-                  <button
-                    type="button"
-                    className="dictation-cancel"
-                    onClick={cancelDictation}
-                    disabled={isUploading || mic.isRecording}
-                    title="Cancel dictation"
-                  >
-                    Cancel
-                  </button>
-                </>
+              <button
+                type="button"
+                className={`dictation-mic-btn ${mic.isRecording ? 'recording' : ''}`}
+                onMouseDown={() => startDictation(DICTATION_MODE.REWRITE)}
+                onMouseUp={stopAndUpload}
+                onMouseLeave={mic.isRecording ? stopAndUpload : undefined}
+                onTouchStart={(e) => { e.preventDefault(); startDictation(DICTATION_MODE.REWRITE); }}
+                onTouchEnd={(e) => { e.preventDefault(); stopAndUpload(); }}
+                disabled={isUploading}
+                aria-label="Hold to dictate (AI Rewrite). Hold Shift for verbatim."
+                title={`${HOTKEY_LABEL.REWRITE} for AI Rewrite · ${HOTKEY_LABEL.VERBATIM} for verbatim`}
+              >
+                <span className="dictation-mic-dot" />
+                <span className="dictation-mic-label">
+                  {mic.isRecording
+                    ? `Recording… (${dictationModeRef.current}) release to insert`
+                    : isUploading
+                      ? 'Transcribing…'
+                      : `Hold ${HOTKEY_LABEL.REWRITE} or this button`}
+                </span>
+              </button>
+              {mic.isRecording && (
+                <button
+                  type="button"
+                  className="dictation-cancel"
+                  onClick={cancelDictation}
+                  title="Discard this recording"
+                >
+                  Cancel
+                </button>
               )}
               {dictationError && (
                 <span className="dictation-error">{dictationError}</span>
