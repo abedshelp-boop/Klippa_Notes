@@ -25,6 +25,8 @@ if (originalGBCR.toString().includes('jsdom') || !originalGBCR.toString().includ
 }
 
 // DOMMatrixReadOnly is referenced by @xyflow/react's transform code.
+// We don't implement the full DOM spec — just enough that constructing one
+// from a "matrix(...)" / "scale(...)" string returns a usable .m22 scale.
 if (typeof globalThis.DOMMatrixReadOnly === 'undefined') {
   class DOMMatrixReadOnlyShim {
     constructor(transform) {
@@ -33,5 +35,7 @@ if (typeof globalThis.DOMMatrixReadOnly === 'undefined') {
       this.m22 = match ? Number(match[1]) : 1;
     }
   }
-  globalThis.DOMMatrixReadOnly = DOMMatrixReadOnlyShim;
+  // The shim is intentionally narrower than the WebIDL DOMMatrixReadOnly type;
+  // erase to `any` so jsconfig's strict mode doesn't reject the test-only stub.
+  globalThis.DOMMatrixReadOnly = /** @type {any} */ (DOMMatrixReadOnlyShim);
 }
