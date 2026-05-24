@@ -35,9 +35,9 @@ const MIGRATION_FLAG = 'deen.migrate.outer-canvas.v1';
  * }} args
  */
 export default function useOuterCanvas({ notes, groups, overlay }) {
-  /** @type {[import('../lib/types.js').OuterCanvasState | null,
-   *         React.Dispatch<React.SetStateAction<any>>]} */
-  const [state, setState] = useState(null);
+  const [state, setState] = useState(
+    /** @type {import('../lib/types.js').OuterCanvasState | null} */ (null),
+  );
   const [loading, setLoading] = useState(true);
   const didMigrate = useRef(false);
 

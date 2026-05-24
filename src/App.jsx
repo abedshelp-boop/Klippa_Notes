@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import Sidebar from './components/Sidebar';
 import Toolbar from './components/Toolbar';
 import WindowChrome from './components/WindowChrome';
-import Home from './components/Home';
+import OuterCanvas from './components/OuterCanvas';
 import NoteView from './components/NoteView';
 import Listening from './components/Listening';
 import Settings from './components/Settings';
@@ -299,17 +299,13 @@ export default function App() {
         <div className="app-content">
           <div className="app-scroll">
             {view === 'home' && (
-              <Home
-                notes={visibleNotes}
-                filter={filter}
-                onFilterChange={handleFilterChange}
-                onOpenNote={handleOpenNote}
+              <OuterCanvas
+                notes={notes}
+                groups={groups}
                 overlay={overlay}
-                onEditNote={triggerEdit}
-                onDeletePermanently={deletePermanently}
+                filter={filter}
+                onOpenNote={handleOpenNote}
                 onCreateNote={handleCreateEmptyNote}
-                onMoveToGroup={(id) => setMoveModalNoteId(id)}
-                onRenameNote={(id, title) => updateNoteOnServer(id, { title })}
               />
             )}
             {view === 'note' && activeNote && (
@@ -325,17 +321,13 @@ export default function App() {
               />
             )}
             {view === 'note' && !activeNote && (
-              <Home
-                notes={visibleNotes}
-                filter={filter}
-                onFilterChange={handleFilterChange}
-                onOpenNote={handleOpenNote}
+              <OuterCanvas
+                notes={notes}
+                groups={groups}
                 overlay={overlay}
-                onEditNote={triggerEdit}
-                onDeletePermanently={deletePermanently}
+                filter={filter}
+                onOpenNote={handleOpenNote}
                 onCreateNote={handleCreateEmptyNote}
-                onMoveToGroup={(id) => setMoveModalNoteId(id)}
-                onRenameNote={(id, title) => updateNoteOnServer(id, { title })}
               />
             )}
           </div>
