@@ -4,8 +4,10 @@ import {
   createOuterFrame,
   createFreeConnector,
   migrateLegacyToOuterCanvas,
+  toReactFlow,
+  fromReactFlow,
 } from '../outer.js';
-import { isOuterCanvasState } from '../validators.js';
+import { emptyOuterCanvasState, isOuterCanvasState } from '../validators.js';
 
 describe('createNoteCard', () => {
   it('produces a NoteCard with sensible defaults', () => {
@@ -153,5 +155,114 @@ describe('migrateLegacyToOuterCanvas', () => {
     expect(state.noteCards[0].pinned).toBe(true);
     expect(state.noteCards[0].archived).toBe(true);
     expect(state.noteCards[0].tags).toEqual(['focus', 'urgent']);
+  });
+});
+
+describe('toReactFlow', () => {
+  it('frames become frame-typed nodes; note cards become note-card nodes with parentId', () => {
+    const frame = createOuterFrame({ label: 'Books', position: { x: 0, y: 0 } });
+    const card = createNoteCard({
+      noteId: 'n1', frameId: frame.id, position: { x: 24, y: 60 },
+    });
+    const state = { ...emptyOuterCanvasState(), frames: [frame], noteCards: [card] };
+    const { nodes, edges } = toReactFlow(state);
+    const frameNode = nodes.find((n) => n.id === frame.id);
+    const cardNode = nodes.find((n) => n.id === card.id);
+    expect(frameNode.type).toBe('frame');
+    expect(cardNode.type).toBe('note-card');
+    expect(cardNode.parentId).toBe(frame.id);
+    expect(cardNode.extent).toBe('parent');
+    expect(edges).toEqual([]);
+  });
+
+  it('cards without a parent omit parentId', () => {
+    const card = createNoteCard({ noteId: 'n1', frameId: null });
+    const state = { ...emptyOuterCanvasState(), noteCards: [card] };
+    const { nodes } = toReactFlow(state);
+    expect(nodes[0].parentId).toBeUndefined();
+    expect(nodes[0].extent).toBeUndefined();
+  });
+
+  it('free connectors become edges of type free', () => {
+    const a = createNoteCard({ noteId: 'a' });
+    const b = createNoteCard({ noteId: 'b' });
+    const conn = createFreeConnector({ sourceCardId: a.id, targetCardId: b.id });
+    const state = {
+      ...emptyOuterCanvasState(),
+      noteCards: [a, b],
+      connectors: [conn],
+    };
+    const { edges } = toReactFlow(state);
+    expect(edges).toHaveLength(1);
+    expect(edges[0].id).toBe(conn.id);
+    expect(edges[0].source).toBe(a.id);
+    expect(edges[0].target).toBe(b.id);
+    expect(edges[0].type).toBe('free');
+  });
+
+  it('renders frames before note-cards so children draw on top', () => {
+    const frame = createOuterFrame({ label: 'F' });
+    const card = createNoteCard({ noteId: 'a', frameId: frame.id });
+    const state = { ...emptyOuterCanvasState(), frames: [frame], noteCards: [card] };
+    const { nodes } = toReactFlow(state);
+    const frameIdx = nodes.findIndex((n) => n.id === frame.id);
+    const cardIdx = nodes.findIndex((n) => n.id === card.id);
+    expect(frameIdx).toBeLessThan(cardIdx);
+  });
+});
+
+describe('fromReactFlow', () => {
+  it('round-trips toReactFlow output back to an equivalent state', () => {
+    const frame = createOuterFrame({ label: 'F', position: { x: 100, y: 100 } });
+    const a = createNoteCard({
+      noteId: 'a', frameId: frame.id, position: { x: 24, y: 60 },
+      pinned: true, tags: ['x'], archived: false,
+    });
+    const b = createNoteCard({ noteId: 'b', position: { x: 0, y: 800 } });
+    const conn = createFreeConnector({ sourceCardId: a.id, targetCardId: b.id });
+    const original = {
+      schemaVersion: 1,
+      noteCards: [a, b],
+      frames: [frame],
+      connectors: [conn],
+      viewport: { x: 10, y: 20, zoom: 0.8 },
+    };
+    const graph = toReactFlow(original);
+    const restored = fromReactFlow(graph, original.viewport);
+    expect(restored.frames).toEqual(original.frames);
+    expect(restored.noteCards).toEqual(original.noteCards);
+    expect(restored.connectors).toEqual(original.connectors);
+    expect(restored.viewport).toEqual(original.viewport);
+  });
+
+  it('infers frameId from parentId on the node back into the NoteCard', () => {
+    const frame = createOuterFrame({ label: 'F' });
+    const card = createNoteCard({ noteId: 'n', frameId: null });
+    const state = { ...emptyOuterCanvasState(), frames: [frame], noteCards: [card] };
+    const graph = toReactFlow(state);
+    // Simulate the user dragging the card into the frame: ReactFlow would set
+    // parentId on the card node. Mimic that here.
+    const cardNode = graph.nodes.find((n) => n.id === card.id);
+    cardNode.parentId = frame.id;
+    cardNode.extent = 'parent';
+    const restored = fromReactFlow(graph, { x: 0, y: 0, zoom: 1 });
+    expect(restored.noteCards[0].frameId).toBe(frame.id);
+  });
+
+  it('preserves card metadata across the round trip', () => {
+    const card = createNoteCard({
+      noteId: 'n', pinned: true, tags: ['a', 'b'], archived: true,
+    });
+    const state = { ...emptyOuterCanvasState(), noteCards: [card] };
+    const restored = fromReactFlow(toReactFlow(state), state.viewport);
+    expect(restored.noteCards[0].pinned).toBe(true);
+    expect(restored.noteCards[0].tags).toEqual(['a', 'b']);
+    expect(restored.noteCards[0].archived).toBe(true);
+  });
+
+  it('produces a valid OuterCanvasState (passes the validator)', () => {
+    const empty = toReactFlow(emptyOuterCanvasState());
+    const restored = fromReactFlow(empty, { x: 0, y: 0, zoom: 1 });
+    expect(isOuterCanvasState(restored)).toBe(true);
   });
 });

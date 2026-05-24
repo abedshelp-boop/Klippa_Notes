@@ -177,3 +177,136 @@ export function migrateLegacyToOuterCanvas({ notes, groups, overlay }) {
 
   return state;
 }
+
+/**
+ * Convert OuterCanvasState into the `{ nodes, edges }` shape ReactFlow expects.
+ * Frame nodes are emitted before note-card nodes so children render on top of
+ * their parent's background.
+ *
+ * The returned `nodes` carry a `style` with `width`/`height` so React Flow
+ * sizes each node correctly (custom node types fill that box via `width:100%`
+ * in CSS).
+ *
+ * @param {import('../types.js').OuterCanvasState} state
+ * @returns {{ nodes: Array<any>, edges: Array<any> }}
+ */
+export function toReactFlow(state) {
+  /** @type {Array<any>} */
+  const nodes = [];
+
+  for (const frame of state.frames) {
+    nodes.push({
+      id: frame.id,
+      type: 'frame',
+      position: { x: frame.position.x, y: frame.position.y },
+      data: { label: frame.label, isAutoLooseIdeas: frame.isAutoLooseIdeas },
+      style: { width: frame.size.w, height: frame.size.h },
+    });
+  }
+
+  for (const card of state.noteCards) {
+    /** @type {any} */
+    const node = {
+      id: card.id,
+      type: 'note-card',
+      position: { x: card.position.x, y: card.position.y },
+      data: {
+        noteId: card.noteId,
+        pinned: card.pinned,
+        tags: card.tags,
+        archived: card.archived,
+      },
+      style: { width: card.size.w, height: card.size.h },
+    };
+    if (card.frameId) {
+      node.parentId = card.frameId;
+      node.extent = 'parent';
+    }
+    nodes.push(node);
+  }
+
+  /** @type {Array<any>} */
+  const edges = state.connectors.map((c) => ({
+    id: c.id,
+    source: c.sourceCardId,
+    target: c.targetCardId,
+    type: c.kind === 'free' ? 'free' : c.kind,
+    label: c.label || undefined,
+    data: { kind: c.kind },
+  }));
+
+  return { nodes, edges };
+}
+
+/**
+ * Convert a ReactFlow graph + viewport back to an OuterCanvasState. Used
+ * before persisting changes.
+ *
+ * Notes:
+ *  - Node `type` drives the kind; unknown types are dropped silently.
+ *  - `parentId` on a node becomes `frameId` on the resulting NoteCard.
+ *  - Size is read from `node.style` (where toReactFlow put it). Missing styles
+ *    fall back to the same defaults the factories use.
+ *
+ * @param {{ nodes: Array<any>, edges: Array<any> }} graph
+ * @param {import('../types.js').CanvasViewport} viewport
+ * @returns {import('../types.js').OuterCanvasState}
+ */
+export function fromReactFlow(graph, viewport) {
+  /** @type {import('../types.js').Frame[]} */
+  const frames = [];
+  /** @type {import('../types.js').NoteCard[]} */
+  const noteCards = [];
+
+  for (const node of graph.nodes) {
+    if (node.type === 'frame') {
+      frames.push({
+        id: node.id,
+        label: node.data?.label ?? '',
+        position: { x: node.position.x, y: node.position.y },
+        size: {
+          w: node.style?.width ?? DEFAULT_FRAME_SIZE.w,
+          h: node.style?.height ?? DEFAULT_FRAME_SIZE.h,
+        },
+        isAutoLooseIdeas: !!node.data?.isAutoLooseIdeas,
+      });
+    } else if (node.type === 'note-card') {
+      noteCards.push({
+        id: node.id,
+        noteId: node.data?.noteId,
+        position: { x: node.position.x, y: node.position.y },
+        size: {
+          w: node.style?.width ?? DEFAULT_NOTE_CARD_SIZE.w,
+          h: node.style?.height ?? DEFAULT_NOTE_CARD_SIZE.h,
+        },
+        rotation: 0,
+        frameId: node.parentId ?? null,
+        pinned: !!node.data?.pinned,
+        tags: Array.isArray(node.data?.tags) ? node.data.tags : [],
+        archived: !!node.data?.archived,
+      });
+    }
+  }
+
+  /** @type {import('../types.js').Connector[]} */
+  const connectors = graph.edges.map((e) => {
+    const kindFromData = e.data?.kind;
+    const kindFromType = e.type;
+    const kind = kindFromData || kindFromType || 'free';
+    return {
+      id: e.id,
+      sourceCardId: e.source,
+      targetCardId: e.target,
+      kind,
+      label: typeof e.label === 'string' ? e.label : '',
+    };
+  });
+
+  return {
+    schemaVersion: 1,
+    noteCards,
+    frames,
+    connectors,
+    viewport: { x: viewport.x, y: viewport.y, zoom: viewport.zoom },
+  };
+}
