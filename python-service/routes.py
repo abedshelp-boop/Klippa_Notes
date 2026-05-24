@@ -263,7 +263,7 @@ async def delete_group_route(group_id: str):
 @app.post("/transcribe-push-to-talk")
 async def transcribe_push_to_talk(
     file: UploadFile = File(...),
-    mode: str = Form("verbatim"),
+    mode: str = Form("rewrite"),
     note_id: str | None = Form(None),
     append: bool = Form(True),
 ):
@@ -271,7 +271,10 @@ async def transcribe_push_to_talk(
 
     Form fields:
       file       — WAV audio blob recorded in the renderer (mono, 16kHz preferred)
-      mode       — "verbatim" (aggressive cleanup) or "rewrite" (AI restructure)
+      mode       — "rewrite" (Sub-project 4 default — AI restructure with sacred-
+                    content preservation) or "verbatim" (aggressive cleanup
+                    only, no restructuring). The renderer picks the mode based
+                    on the hotkey: Ctrl+Space=rewrite, Shift+Ctrl+Space=verbatim.
       note_id    — target note to append to (required when append=true)
       append     — when true (default), append the polished text to the note
                    and broadcast `note_updated`. When false, just return the
