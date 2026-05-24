@@ -3,11 +3,13 @@ import json
 import os
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import Response
 from openai import APIError as OpenAIAPIError
 
 import ai_client
 import database as db
 import language as language_state
+import tts_kokoro
 import target as target_state
 from debug import debug
 from wake_word import get_wake_word_state
@@ -346,6 +348,34 @@ async def transcribe_push_to_talk(
         "appended_to": appended_to,
         "mode": mode,
     }
+
+
+@app.get("/tts/say")
+async def tts_say(text: str = ""):
+    """Sub-project 4: 1-second hear-back synthesis.
+
+    Renderer calls this after a successful capture so the user gets a spoken
+    "Saved to <note>" without looking at the screen. Returns a `audio/wav`
+    body. Hear-back is best-effort: when Kokoro isn't installed or the model
+    file is missing we return a 503 so the renderer can no-op gracefully —
+    crashing the save path here would be worse than skipping the cue.
+
+    The 200-char cap is a guard against accidental long inputs; the
+    confirmation phrases the spec describes are <30 chars.
+    """
+    phrase = (text or "").strip()
+    if not phrase:
+        return Response(content=b"", media_type="audio/wav")
+    if len(phrase) > 200:
+        phrase = phrase[:200]
+
+    try:
+        wav = await asyncio.to_thread(tts_kokoro.synthesize_to_wav, phrase)
+    except tts_kokoro.TTSUnavailable as e:
+        # Best-effort: 503 (Service Unavailable) is the right signal to the
+        # renderer that this is a no-op condition, not a hard error.
+        raise HTTPException(status_code=503, detail=f"TTS unavailable: {e}") from e
+    return Response(content=wav, media_type="audio/wav")
 
 
 @app.post("/trigger")
