@@ -6,6 +6,7 @@ import {
   migrateLegacyToOuterCanvas,
   toReactFlow,
   fromReactFlow,
+  matchesFilter,
 } from '../outer.js';
 import { emptyOuterCanvasState, isOuterCanvasState } from '../validators.js';
 
@@ -264,5 +265,57 @@ describe('fromReactFlow', () => {
     const empty = toReactFlow(emptyOuterCanvasState());
     const restored = fromReactFlow(empty, { x: 0, y: 0, zoom: 1 });
     expect(isOuterCanvasState(restored)).toBe(true);
+  });
+});
+
+describe('matchesFilter', () => {
+  const baseCard = {
+    pinned: false, tags: [], archived: false, frameId: null,
+  };
+
+  it('all: shows non-archived, hides archived', () => {
+    expect(matchesFilter(baseCard, { type: 'all' })).toBe(true);
+    expect(matchesFilter({ ...baseCard, archived: true }, { type: 'all' }))
+      .toBe(false);
+  });
+
+  it('pinned: only pinned non-archived cards', () => {
+    expect(matchesFilter({ ...baseCard, pinned: true }, { type: 'pinned' }))
+      .toBe(true);
+    expect(matchesFilter(baseCard, { type: 'pinned' })).toBe(false);
+    expect(matchesFilter(
+      { ...baseCard, pinned: true, archived: true }, { type: 'pinned' }
+    )).toBe(false);
+  });
+
+  it('archive: only archived cards', () => {
+    expect(matchesFilter({ ...baseCard, archived: true }, { type: 'archive' }))
+      .toBe(true);
+    expect(matchesFilter(baseCard, { type: 'archive' })).toBe(false);
+  });
+
+  it('tag: matches the named tag, ignores archived', () => {
+    const card = { ...baseCard, tags: ['focus', 'urgent'] };
+    expect(matchesFilter(card, { type: 'tag', value: 'focus' })).toBe(true);
+    expect(matchesFilter(card, { type: 'tag', value: 'missing' })).toBe(false);
+    expect(matchesFilter(
+      { ...card, archived: true }, { type: 'tag', value: 'focus' }
+    )).toBe(false);
+  });
+
+  it('group: matches the named frame', () => {
+    expect(matchesFilter(
+      { ...baseCard, frameId: 'frame_a' },
+      { type: 'group', value: 'frame_a' },
+    )).toBe(true);
+    expect(matchesFilter(
+      { ...baseCard, frameId: 'frame_a' },
+      { type: 'group', value: 'frame_b' },
+    )).toBe(false);
+  });
+
+  it('null/undefined filter behaves like "all"', () => {
+    expect(matchesFilter(baseCard, null)).toBe(true);
+    expect(matchesFilter(baseCard, undefined)).toBe(true);
   });
 });

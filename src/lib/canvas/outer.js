@@ -310,3 +310,35 @@ export function fromReactFlow(graph, viewport) {
     viewport: { x: viewport.x, y: viewport.y, zoom: viewport.zoom },
   };
 }
+
+/**
+ * Decide whether a card is visible under the current sidebar filter. Used by
+ * OuterCanvas to set `hidden`/className on each node — the canvas dims or hides
+ * non-matching cards rather than removing them from the graph.
+ *
+ * @typedef {{ pinned?: boolean, tags?: string[],
+ *             archived?: boolean, frameId?: string | null }} CardLike
+ * @typedef {(
+ *   { type: 'all' } |
+ *   { type: 'pinned' } |
+ *   { type: 'archive' } |
+ *   { type: 'tag', value: string } |
+ *   { type: 'group', value: string }
+ * )} CanvasFilter
+ *
+ * @param {CardLike} card
+ * @param {CanvasFilter | null | undefined} filter
+ * @returns {boolean}
+ */
+export function matchesFilter(card, filter) {
+  if (!filter || filter.type === 'all') return !card.archived;
+  if (filter.type === 'pinned') return !!card.pinned && !card.archived;
+  if (filter.type === 'archive') return !!card.archived;
+  if (filter.type === 'tag') {
+    return (card.tags || []).includes(filter.value) && !card.archived;
+  }
+  if (filter.type === 'group') {
+    return card.frameId === filter.value && !card.archived;
+  }
+  return !card.archived;
+}

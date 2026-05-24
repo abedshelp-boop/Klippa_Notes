@@ -2737,3 +2737,180 @@ body::before {
   border-color: var(--ink-3);
   background: rgba(255, 255, 255, 0.08);
 }
+
+/* === Outer canvas (Sub-project 3) ============================== */
+
+.oc-root {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  min-height: 600px;
+  background: var(--bg-1);
+}
+
+/* React Flow's own styles assume a light background; nudge it to match. */
+.oc-root .react-flow {
+  background: var(--bg-1);
+}
+.oc-root .react-flow__background {
+  background-color: var(--bg-1);
+}
+.oc-root .react-flow__controls {
+  background: var(--bg-2);
+  border: 1px solid var(--line);
+}
+.oc-root .react-flow__controls-button {
+  background: transparent;
+  color: var(--ink-1);
+  border-bottom: 1px solid var(--line);
+}
+.oc-root .react-flow__controls-button:hover {
+  background: var(--glass);
+}
+.oc-root .react-flow__minimap {
+  background: var(--bg-2);
+  border: 1px solid var(--line);
+}
+
+.oc-empty {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  pointer-events: none;
+  z-index: 5;
+  text-align: center;
+  gap: 12px;
+  color: var(--ink-1);
+  font-family: var(--sans);
+}
+.oc-empty-headline {
+  font-size: 1.8rem;
+  font-weight: 500;
+  font-family: var(--serif);
+}
+.oc-empty-hint {
+  font-size: 0.95rem;
+  pointer-events: auto;
+  color: var(--ink-2);
+}
+.oc-empty-cta {
+  background: var(--glass-strong);
+  color: var(--ink-0);
+  border: 1px solid var(--line-strong);
+  padding: 6px 12px;
+  border-radius: 6px;
+  cursor: pointer;
+  font-family: inherit;
+  font-size: inherit;
+}
+.oc-empty-cta:hover {
+  background: var(--glass);
+  border-color: var(--ink-3);
+}
+
+.oc-card {
+  background: var(--bg-2);
+  border: 1px solid var(--line-strong);
+  border-radius: 10px;
+  padding: 10px 12px;
+  width: 100%;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.3);
+  font-family: var(--sans);
+  font-size: 0.78rem;
+  cursor: pointer;
+  user-select: none;
+  color: var(--ink-1);
+  overflow: hidden;
+}
+.oc-card:hover {
+  border-color: var(--ink-3);
+  background: rgba(255, 255, 255, 0.05);
+}
+.oc-card.is-pinned {
+  border-color: var(--listen);
+}
+.oc-card.is-archived {
+  opacity: 0.55;
+  border-style: dashed;
+}
+.oc-card-top {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  font-size: 0.65rem;
+  color: var(--ink-3);
+}
+.oc-card-pin {
+  color: var(--listen);
+  font-size: 0.7rem;
+  line-height: 1;
+}
+.oc-card-tag {
+  background: var(--glass);
+  color: var(--ink-1);
+  border-radius: 999px;
+  padding: 1px 8px;
+  font-size: 0.6rem;
+  border: 1px solid var(--line);
+}
+.oc-card-date {
+  margin-left: auto;
+  color: var(--ink-3);
+}
+.oc-card-title {
+  font-size: 0.95rem;
+  font-weight: 600;
+  color: var(--ink-0);
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  line-height: 1.25;
+}
+.oc-card-preview {
+  color: var(--ink-2);
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  line-height: 1.4;
+}
+.oc-card-handle {
+  width: 8px;
+  height: 8px;
+  background: var(--listen);
+  border: 2px solid var(--bg-1);
+}
+
+.oc-frame {
+  width: 100%;
+  height: 100%;
+  background: rgba(255, 255, 255, 0.02);
+  border: 1px dashed var(--line-strong);
+  border-radius: 14px;
+  padding: 8px 12px;
+  pointer-events: all;
+  font-family: var(--sans);
+}
+.oc-frame.is-loose {
+  background: rgba(180, 180, 255, 0.04);
+  border-color: rgba(180, 180, 255, 0.18);
+}
+.oc-frame-label {
+  font-size: 0.7rem;
+  font-weight: 600;
+  color: var(--ink-2);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.oc-node-hidden {
+  display: none !important;
+}
