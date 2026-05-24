@@ -33,6 +33,16 @@ async def init_db():
             )
         """)
 
+        # Outer canvas: singleton row holding the pinboard state as JSON.
+        # See docs/superpowers/decisions/2026-05-24-canvas-state-serialization.md.
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS outer_canvas (
+                id INTEGER PRIMARY KEY CHECK (id = 1),
+                state TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            )
+        """)
+
         # Migration for existing databases that lack the video_url column.
         cursor = await db.execute("PRAGMA table_info(notes)")
         columns = {row[1] for row in await cursor.fetchall()}
@@ -296,3 +306,46 @@ def _row_to_dict(row) -> dict:
         # here would be pure noise.
         d["tags"] = []
     return d
+
+
+# --------------------------- Outer canvas -----------------------------------
+
+
+async def get_outer_canvas() -> dict | None:
+    """Return the singleton outer-canvas row as
+    `{"state": <dict>, "updated_at": <iso>}`.
+
+    Returns None when the row has not been written yet — the client interprets
+    that as "no migration has run; build state from the legacy data and PUT it."
+    """
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        cursor = await db.execute(
+            "SELECT state, updated_at FROM outer_canvas WHERE id = 1"
+        )
+        row = await cursor.fetchone()
+        if row is None:
+            return None
+        try:
+            state = json.loads(row["state"])
+        except (json.JSONDecodeError, TypeError):
+            # Corrupt JSON shouldn't kill the app — surface as "no state yet"
+            # and let the client run the migration path again.
+            return None
+        return {"state": state, "updated_at": row["updated_at"]}
+
+
+async def set_outer_canvas(state: dict) -> dict:
+    """UPSERT the singleton outer-canvas row. Returns the persisted shape."""
+    now = datetime.now(timezone.utc).isoformat()
+    payload = json.dumps(state)
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute(
+            "INSERT INTO outer_canvas (id, state, updated_at) "
+            "VALUES (1, ?, ?) "
+            "ON CONFLICT(id) DO UPDATE SET state = excluded.state, "
+            "updated_at = excluded.updated_at",
+            (payload, now),
+        )
+        await db.commit()
+    return {"state": state, "updated_at": now}

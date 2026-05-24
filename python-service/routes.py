@@ -258,6 +258,45 @@ async def delete_group_route(group_id: str):
     return {"success": success}
 
 
+# --------------------------- Outer canvas -----------------------------------
+
+
+@app.get("/outer-canvas")
+async def get_outer_canvas_route():
+    """Return the singleton outer-canvas state.
+
+    When no row has been written yet, the response carries
+    `{"state": null, "updated_at": null}` — the client treats that as
+    "run the one-shot migration from the legacy notes/groups data and
+    PUT the result here."
+    """
+    row = await db.get_outer_canvas()
+    if row is None:
+        return {"state": None, "updated_at": None}
+    return row
+
+
+@app.put("/outer-canvas")
+async def put_outer_canvas_route(body: dict):
+    """Replace the singleton outer-canvas state with `body.state`.
+
+    Broadcasts `outer_canvas_updated` so other windows refresh their canvas.
+    """
+    state = body.get("state")
+    if not isinstance(state, dict):
+        raise HTTPException(
+            status_code=400,
+            detail="body.state must be an object",
+        )
+    saved = await db.set_outer_canvas(state)
+    await broadcast({
+        "type": "outer_canvas_updated",
+        "state": saved["state"],
+        "updated_at": saved["updated_at"],
+    })
+    return saved
+
+
 @app.post("/transcribe-push-to-talk")
 async def transcribe_push_to_talk(
     file: UploadFile = File(...),
