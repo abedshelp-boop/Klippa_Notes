@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>Spike — React Flow draggable card</title>
+<style>
+  html, body, #root { height: 100%; margin: 0; }
+  .card { padding: 12px 16px; background: #fff; border: 1px solid #ddd;
+          border-radius: 8px; font-family: system-ui; }
+</style>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@xyflow/react@12/dist/style.css" />
+</head>
+<body>
+<div id="root"></div>
+<script type="importmap">
+{ "imports": {
+  "react": "https://esm.sh/react@19",
+  "react-dom/client": "https://esm.sh/react-dom@19/client",
+  "@xyflow/react": "https://esm.sh/@xyflow/react@12?deps=react@19,react-dom@19"
+} }
+</script>
+<script type="module">
+import React from 'react';
+import { createRoot } from 'react-dom/client';
+import { ReactFlow, Background, Controls } from '@xyflow/react';
+
+const initialNodes = [
+  { id: '1', position: { x: 120, y: 80 },
+    data: { label: React.createElement('div', { className: 'card' }, 'Drag me') } },
+];
+
+function App() {
+  return React.createElement(ReactFlow, { defaultNodes: initialNodes, fitView: true },
+    React.createElement(Background, null),
+    React.createElement(Controls, null));
+}
+
+createRoot(document.getElementById('root')).render(React.createElement(App));
+</script>
+</body>
+</html>
