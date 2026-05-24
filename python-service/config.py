@@ -15,6 +15,23 @@ else:
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
 PICOVOICE_ACCESS_KEY = os.getenv("PICOVOICE_ACCESS_KEY", "")
 ASSEMBLYAI_API_KEY = os.getenv("ASSEMBLYAI_API_KEY", "")
+# Sub-project 4: Deepgram Nova-3 is the new primary transcriber. Empty key
+# routes the chain straight to faster-whisper (offline fallback).
+DEEPGRAM_API_KEY = os.getenv("DEEPGRAM_API_KEY", "")
+
+# Sub-project 4: Kokoro TTS for hear-back confirmations. Model + voices
+# default to python-service/models/ but can be overridden by env so a shared
+# install can be reused across dev + packaged builds.
+KOKORO_MODEL_PATH = os.getenv(
+    "KOKORO_MODEL_PATH",
+    str(SERVICE_DIR / "models" / "kokoro-v1.0.onnx"),
+)
+KOKORO_VOICES_PATH = os.getenv(
+    "KOKORO_VOICES_PATH",
+    str(SERVICE_DIR / "models" / "voices-v1.0.bin"),
+)
+# "af_heart" is the warm, friendly American-female voice Abed picked.
+KOKORO_VOICE = os.getenv("KOKORO_VOICE", "af_heart")
 
 # Smart language routing: probe the first N seconds with OpenAI whisper-1 to
 # detect language, then route to AssemblyAI (English — keeps keyterms +
