@@ -602,6 +602,32 @@ ipcMain.handle('bubble:show-main', () => {
 });
 ipcMain.handle('bubble:trigger-note', () => triggerNoteCapture());
 
+// Sub-project 4: TTS hear-back. Renderer requests a 1-second "Saved to X"
+// confirmation; we forward to the Python /tts/say endpoint and return the
+// WAV bytes as an ArrayBuffer the renderer can hand to new Audio(). The
+// 3-second timeout caps how long the user-facing save path can wait — TTS
+// is fire-and-forget, never blocking.
+ipcMain.handle('tts:say', async (_e, text) => {
+  const phrase = typeof text === 'string' ? text.trim() : '';
+  if (!phrase) return null;
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 3000);
+  try {
+    const res = await fetch(
+      `http://127.0.0.1:8765/tts/say?text=${encodeURIComponent(phrase)}`,
+      { signal: controller.signal },
+    );
+    if (!res.ok) return null;
+    const buf = await res.arrayBuffer();
+    return buf.byteLength > 0 ? buf : null;
+  } catch (err) {
+    debug.warn('TTS', 'hear-back failed (non-fatal)', err);
+    return null;
+  } finally {
+    clearTimeout(timer);
+  }
+});
+
 // ── Picker IPC ───────────────────────────────────────────────────────────
 ipcMain.handle('picker:open', () => {
   showPicker();
