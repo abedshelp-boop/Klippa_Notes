@@ -28,3 +28,4 @@ python-service/.env
 coverage/
 .pytest_cache/
 .vitest-cache/
+.superpowers/

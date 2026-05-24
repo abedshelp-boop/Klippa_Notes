@@ -14,4 +14,12 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.on('bubble:visibility', handler);
     return () => ipcRenderer.removeListener('bubble:visibility', handler);
   },
+
+  // Phase 4: subscribe to "open this note in edit mode" requests from the
+  // main process (used by the picker's "+ Create empty note" row).
+  onOpenNote: (callback) => {
+    const handler = (_event, noteId) => callback(noteId);
+    ipcRenderer.on('note:open', handler);
+    return () => ipcRenderer.removeListener('note:open', handler);
+  },
 });
