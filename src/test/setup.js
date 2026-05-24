@@ -1,4 +1,13 @@
 import '@testing-library/jest-dom/vitest';
+import { afterEach } from 'vitest';
+import { cleanup } from '@testing-library/react';
+
+// With `globals: false` in vitest.config.js, testing-library's automatic
+// afterEach(cleanup) doesn't register. Without this, mounted DOMs accumulate
+// across tests and getByText matches duplicates.
+afterEach(() => {
+  cleanup();
+});
 
 // React Flow uses ResizeObserver and getBoundingClientRect; jsdom stubs neither.
 // Provide just enough surface for nodes to mount without exploding.
