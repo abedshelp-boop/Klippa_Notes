@@ -1944,6 +1944,159 @@ body::before {
   font-style: italic;
 }
 
+/* ============================================================== */
+/* ---------- Inner Canvas (canvas redesign sub-project 1) ------- */
+/* ============================================================== */
+/* All class names prefixed `.ic-` per the CSS namespace decision  */
+/* in docs/superpowers/decisions/2026-05-24-main-only-workflow.md  */
+
+.ic-note-view {
+  position: relative;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  background: var(--canvas-bg, var(--paper, #fff));
+}
+
+.ic-rail {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 16px;
+  border-bottom: 1px solid var(--line-soft, rgba(0, 0, 0, 0.06));
+  flex: 0 0 auto;
+}
+
+.ic-back {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  background: none;
+  border: none;
+  padding: 6px 10px;
+  border-radius: 6px;
+  cursor: pointer;
+  font: inherit;
+  color: var(--ink-2, #555);
+}
+
+.ic-back:hover {
+  background: rgba(0, 0, 0, 0.04);
+}
+
+.ic-rail-spacer { flex: 1; }
+
+.ic-rail-date {
+  color: var(--ink-3, #777);
+  font-size: 12px;
+}
+
+.ic-rail-actions {
+  display: inline-flex;
+  gap: 4px;
+  align-items: center;
+}
+
+.ic-header {
+  flex: 0 0 auto;
+  padding: 16px 24px 8px;
+  border-bottom: 1px solid var(--line-soft, rgba(0, 0, 0, 0.04));
+}
+
+.ic-title {
+  font-size: 28px;
+  font-weight: 600;
+  margin: 0 0 8px;
+  cursor: text;
+  color: var(--ink-0, #111);
+}
+
+.ic-title-input {
+  font-size: 28px;
+  font-weight: 600;
+  margin: 0 0 8px;
+  width: 100%;
+  border: 1px solid var(--line-strong, #d0d0d0);
+  border-radius: 6px;
+  padding: 6px 10px;
+  background: var(--paper, #fff);
+  color: var(--ink-0, #111);
+  font-family: inherit;
+}
+
+.ic-tags { margin: 8px 0; }
+.ic-dictation { margin-top: 8px; }
+
+.ic-surface {
+  flex: 1 1 auto;
+  position: relative;
+  overflow: hidden;
+  background:
+    radial-gradient(circle, rgba(0, 0, 0, 0.06) 1px, transparent 1px) 0 0 / 16px 16px,
+    var(--canvas-bg, #fafafa);
+}
+
+/* Preview-mode fallback (used by render tests + any future thumbnail).
+   Lays cards out vertically so renderToStaticMarkup produces stable HTML. */
+.ic-canvas-preview {
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  height: 100%;
+  overflow: auto;
+}
+
+/* ---------- TextCard primitive ---------- */
+
+.ic-textcard {
+  background: var(--card-bg, var(--paper, #fff));
+  border: 1px solid var(--card-border, rgba(0, 0, 0, 0.08));
+  border-radius: 10px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
+  padding: 16px 20px;
+  min-width: 200px;
+  max-width: 100%;
+  position: relative;
+}
+
+.ic-textcard.editing {
+  outline: 2px solid var(--accent, #4a7df8);
+  outline-offset: -1px;
+}
+
+.ic-textcard-body {
+  line-height: 1.55;
+  font-size: 15px;
+  word-wrap: break-word;
+}
+
+.ic-textcard-editor {
+  width: 100%;
+  min-height: 80px;
+  border: none;
+  outline: none;
+  resize: none;
+  background: transparent;
+  font: inherit;
+  line-height: 1.55;
+  color: inherit;
+}
+
+/* React Flow surface tweaks (scoped to .ic-surface so other canvases
+   aren't affected). React Flow's CSS is imported in InnerCanvas.jsx. */
+.ic-surface .react-flow__node {
+  padding: 0;
+  border: none;
+  background: transparent;
+  width: auto;
+}
+
+.ic-surface .react-flow__handle {
+  opacity: 0;
+  pointer-events: none;
+}
+
 /* ---------- "+ New note" buttons (Phase 4) ---------- */
 
 .toolbar-new-btn {
