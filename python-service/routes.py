@@ -168,11 +168,14 @@ async def create_note_route(body: dict):
 
 @app.put("/notes/{note_id}")
 async def update_note_route(note_id: str, body: dict):
-    """Partial update for a note (title / content / tags / source / group_id).
+    """Partial update for a note (title / content / tags / source / group_id /
+    canvas_state).
 
     Any field omitted from the body is left untouched. Pass `"group_id": null`
-    to detach a note from its group. Broadcasts {"type": "note_updated", ...}
-    so the React UI refreshes via useWebSocket.
+    to detach a note from its group. Pass `"canvas_state": null` to clear the
+    canvas state (renderer falls back to the legacy `content` markdown).
+    Broadcasts {"type": "note_updated", ...} so the React UI refreshes via
+    useWebSocket.
     """
     kwargs = {}
     if "title" in body:
@@ -185,6 +188,8 @@ async def update_note_route(note_id: str, body: dict):
         kwargs["source"] = body["source"]
     if "group_id" in body:
         kwargs["group_id"] = body["group_id"]  # may be None to detach
+    if "canvas_state" in body:
+        kwargs["canvas_state"] = body["canvas_state"]  # may be None to clear
 
     note = await db.update_note(note_id, **kwargs)
     if note is None:

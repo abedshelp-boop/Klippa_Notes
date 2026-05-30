@@ -48,6 +48,17 @@ async def init_db():
                 "REFERENCES groups(id) ON DELETE SET NULL"
             )
 
+        # Migration for existing databases that lack the canvas_state column
+        # (canvas redesign sub-project 1). Nullable so we can distinguish
+        # "never migrated" (null → render fallback from content) from
+        # "explicitly empty canvas" (a serialized InnerCanvasState with no
+        # cards). Shape on the wire is owned by src/lib/types.js
+        # (InnerCanvasState).
+        if "canvas_state" not in columns:
+            await db.execute(
+                "ALTER TABLE notes ADD COLUMN canvas_state TEXT"
+            )
+
         await db.execute(
             "CREATE INDEX IF NOT EXISTS idx_groups_parent ON groups(parent_id)"
         )
@@ -141,11 +152,14 @@ async def append_to_note(note_id: str, new_content: str,
 
 async def update_note(note_id: str, *,
                       title=_UNSET, content=_UNSET,
-                      group_id=_UNSET, tags=_UNSET, source=_UNSET) -> dict | None:
+                      group_id=_UNSET, tags=_UNSET, source=_UNSET,
+                      canvas_state=_UNSET) -> dict | None:
     """Partial update of a note. Pass _UNSET (default) to leave a field alone.
 
     Pass None for `group_id` to detach a note from its group.
-    `tags` may be a list (will be JSON-encoded) or a JSON string.
+    Pass None for `canvas_state` to clear it (renderer falls back to legacy
+    `content`). `tags` may be a list (JSON-encoded) or a JSON string.
+    `canvas_state` may be a dict / list (JSON-encoded) or already a JSON string.
     Returns the updated note dict, or None if the id doesn't exist.
     """
     fields: list[str] = []
@@ -166,6 +180,14 @@ async def update_note(note_id: str, *,
     if source is not _UNSET:
         fields.append("source = ?")
         values.append(source)
+    if canvas_state is not _UNSET:
+        fields.append("canvas_state = ?")
+        if canvas_state is None:
+            values.append(None)
+        elif isinstance(canvas_state, str):
+            values.append(canvas_state)
+        else:
+            values.append(json.dumps(canvas_state))
 
     if not fields:
         # Nothing to update — return current state.
@@ -295,4 +317,16 @@ def _row_to_dict(row) -> dict:
         # default to [] silently. Fires on every legacy row read — a log
         # here would be pure noise.
         d["tags"] = []
+    # canvas_state is nullable. null on the wire signals "fall back to
+    # legacy content" to the renderer (sub-project 1 fallback); a JSON
+    # object signals the InnerCanvasState shape from src/lib/types.js.
+    # Corrupt JSON degrades to null so the renderer falls back to content.
+    raw_cs = d.get("canvas_state")
+    if raw_cs is None:
+        d["canvas_state"] = None
+    else:
+        try:
+            d["canvas_state"] = json.loads(raw_cs)
+        except (json.JSONDecodeError, TypeError):
+            d["canvas_state"] = None
     return d
