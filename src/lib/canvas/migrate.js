@@ -1,17 +1,15 @@
 // @ts-check
 /**
- * Canvas state migration. Foundation ships only the scaffold; sub-project 1
- * adds `migrateLegacyMarkdown(noteContent)` which converts a pre-redesign
- * note's `content` field into a one-TextCard `InnerCanvasState`.
- *
- * If you're sub-project 1 reading this: that function goes here, and
- * `App.jsx`'s migration block (see existing pattern with `deen.migrate.*`
- * localStorage flags) gates it behind `deen.migrate.canvas.v1`.
+ * Canvas state migration. Sub-project 1 ships `migrateLegacyMarkdown`,
+ * which converts a pre-redesign note's `content` field into a one-TextCard
+ * `InnerCanvasState`. App.jsx's migration block calls this once per note
+ * on first launch, gated by the `deen.migrate.canvas.v1` localStorage flag.
  *
  * @module
  */
 
 import { isInnerCanvasState, emptyInnerCanvasState } from './validators.js';
+import { innerStateFromNote } from './cardState.js';
 
 export const CURRENT_SCHEMA_VERSION = 1;
 
@@ -26,4 +24,20 @@ export function migrateInnerCanvasState(raw) {
   if (isInnerCanvasState(raw)) return raw;
   // Future: branch on raw.schemaVersion when bumping past 1.
   return emptyInnerCanvasState();
+}
+
+/**
+ * One-time migration: convert a legacy note's markdown content into a
+ * one-TextCard InnerCanvasState at position (0,0). Idempotent under
+ * `migrateInnerCanvasState` — the output already satisfies isInnerCanvasState.
+ *
+ * Null / undefined / non-string input is treated as an empty card so callers
+ * don't have to coalesce. App.jsx iterates every note and PUTs the result
+ * to `/notes/{id}` as `canvas_state`.
+ *
+ * @param {string | null | undefined} noteContent
+ * @returns {import('../types.js').InnerCanvasState}
+ */
+export function migrateLegacyMarkdown(noteContent) {
+  return innerStateFromNote({ content: noteContent ?? '' });
 }
