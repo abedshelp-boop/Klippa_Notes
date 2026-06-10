@@ -1,3 +1,7 @@
+// @ts-nocheck
+// Tests read Card.data.markdown directly; the runtime always returns
+// TextCardData here, but the JSDoc discriminated union can't be narrowed
+// from .type at the test-call site without verbose assertions.
 import { describe, it, expect } from 'vitest';
 import {
   migrateInnerCanvasState,

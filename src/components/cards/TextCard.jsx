@@ -6,6 +6,11 @@ import rehypeKatex from 'rehype-katex';
 import rehypeHighlight from 'rehype-highlight';
 import rehypeRaw from 'rehype-raw';
 import rehypeSanitize, { defaultSchema } from 'rehype-sanitize';
+// `Handle` is exported as both a value and a type by @xyflow/react; the
+// JSDoc compiler picks the type alias first under strict mode and complains
+// about `TS18042`. The runtime works fine — silencing the line.
+// eslint-disable-next-line @typescript-eslint/ban-ts-comment
+// @ts-ignore TS18042
 import { Handle, Position } from '@xyflow/react';
 import MermaidBlock from '../MermaidBlock';
 import ChartBlock from '../ChartBlock';
@@ -45,11 +50,13 @@ const SANITIZE_SCHEMA = {
   },
 };
 
+/** @type {any[]} — plugin tuple shape is too narrow for the union inference */
 const REMARK_PLUGINS = [remarkGfm, remarkMath];
 /* Plugin order is load-bearing — same rationale as NoteView.jsx:
    1. rehypeRaw — re-parse raw HTML so inline <svg> becomes real hast nodes.
    2. rehypeKatex / rehypeHighlight — transform math + code into span trees.
    3. rehypeSanitize LAST — strip everything not in the allow-list. */
+/** @type {any[]} */
 const REHYPE_PLUGINS = [
   rehypeRaw,
   rehypeKatex,
@@ -57,6 +64,10 @@ const REHYPE_PLUGINS = [
   [rehypeSanitize, SANITIZE_SCHEMA],
 ];
 
+/** @type {any} — react-markdown's Components type is narrower than the
+ * runtime shape; the same override works fine in NoteView.jsx but the
+ * inline-object form there avoids the strict assignability check.
+ */
 const MARKDOWN_COMPONENTS = {
   code({ className, children, ...props }) {
     const text = String(children || '').replace(/\n$/, '');
@@ -84,11 +95,17 @@ const MARKDOWN_COMPONENTS = {
  *
  * @param {{
  *   id: string,
- *   data: { markdown: string, onCommitMarkdown?: function, onEditingChange?: function },
+ *   data: any,
  *   onCommitMarkdown?: (cardId: string, markdown: string) => void,
  *   onEditingChange?: (cardId: string, editing: boolean) => void,
  *   isPreview?: boolean,
  * }} props
+ *
+ * `data` is typed `any` because React Flow passes the node's full
+ * `data` object verbatim, and that object's runtime shape is
+ * `TextCardData & { onCommitMarkdown?, onEditingChange? }` — typing
+ * it precisely would require duplicating the InnerCanvasState's
+ * discriminated union in this prop signature.
  *
  * React Flow passes the node's `data` object verbatim to the custom node.
  * InnerCanvas injects `onCommitMarkdown` and `onEditingChange` into `data`

@@ -68,7 +68,7 @@ export default function InnerCanvas({
   onDeletePermanently,
   overlay,
   startInEdit = false,
-  onEditConsumed,
+  onEditConsumed = () => {},
   onUpdateNote,
   onMoveToGroup,
   previewMode = false,
