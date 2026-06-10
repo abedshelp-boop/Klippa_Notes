@@ -22,7 +22,8 @@ from vad import extract_speech
 
 async def process_note(system_audio, command_audio, broadcast_fn,
                        media_was_paused=False, target=None,
-                       language=None):
+                       language=None, routing_decision=None,
+                       quick_inbox_id=None):
     """
     Full pipeline: audio -> VAD trim -> transcription -> note generation -> save.
     Runs blocking AI calls in a thread pool.
@@ -195,39 +196,71 @@ async def process_note(system_audio, command_audio, broadcast_fn,
         # LLM received → what it produced.
         _append_note_content_to_log(timestamp, note_data.get("content", ""))
 
-        # Routing — user-selected target (replaces old video-URL match):
-        # 1) Pinned to an existing note → append.
-        # 2) "Create new file" pending → create + auto-pin to the new note.
-        # 3) No selection (or stale target whose note was deleted) →
-        #    create a fresh note. If the target was stale, also clear it so
-        #    the bubble label reverts to "Choose file" — silently re-pinning
-        #    to a brand-new note would surprise the user.
+        # Routing precedence:
+        # 1. voice_routing.RoutingDecision (when a command transcript was
+        #    parseable) wins outright. This is the new voice-grammar path.
+        # 2. target_state pinned note (legacy picker pin) — preserves the
+        #    pre-voice-grammar behavior for users who set a pin via the bubble.
+        # 3. context_state foreground-open-note default for plain captures.
+        # 4. Quick Inbox.
+        import context_state
+        import quick_inbox as qi_mod
+        import tts_client
+
         existing_note = None
         target_was_stale = False
-        if target and target.get("note_id"):
-            existing_note = await get_note(target["note_id"])
-            if existing_note is None:
-                target_was_stale = True
+        proposed_title = None
+        create_new = False
+        body_content = note_data.get("content", system_transcript)
+
+        if routing_decision is not None:
+            if routing_decision.kind == "existing" and routing_decision.note_id:
+                existing_note = await get_note(routing_decision.note_id)
+                if existing_note is None:
+                    target_was_stale = True
+                    # Stale routing target — fall through to Quick Inbox.
+                    inbox = await qi_mod.ensure_quick_inbox()
+                    existing_note = inbox
+            elif routing_decision.kind == "create_new":
+                create_new = True
+                proposed_title = routing_decision.proposed_title
+        else:
+            # Legacy path (no voice routing decision was provided — likely the
+            # /trigger keyboard shortcut firing with no command transcript).
+            if target and target.get("note_id"):
+                existing_note = await get_note(target["note_id"])
+                if existing_note is None:
+                    target_was_stale = True
+            elif target and target.get("create_new_pending"):
+                create_new = True
+            else:
+                ctx = context_state.get_context()
+                if ctx.get("foreground") and ctx.get("open_note_id"):
+                    existing_note = await get_note(ctx["open_note_id"])
+                if existing_note is None:
+                    inbox = await qi_mod.ensure_quick_inbox()
+                    existing_note = inbox
 
         if existing_note:
-            updated = await append_to_note(
-                existing_note["id"], note_data.get("content", system_transcript)
-            )
+            updated = await append_to_note(existing_note["id"], body_content)
             await broadcast_fn({"type": "note_updated", "note": updated})
             debug.log("Deen", "appended to existing note", existing_note["title"])
+            context_state.set_last_capture(existing_note["id"])
+            tts_client.say(f"Saved to {existing_note['title']}")
         else:
+            title_to_use = proposed_title or note_data.get("title", "Untitled Note")
             note = await create_note(
-                title=note_data.get("title", "Untitled Note"),
-                content=note_data.get("content", system_transcript),
+                title=title_to_use,
+                content=body_content,
                 tags=note_data.get("tags", []),
                 source=note_data.get("source", ""),
             )
             await broadcast_fn({"type": "note", "note": note})
             debug.log("Deen", "note created", note["title"])
+            context_state.set_last_capture(note["id"])
+            tts_client.say(f"Saved to {note['title']}")
 
-            if target and target.get("create_new_pending"):
-                # User explicitly asked for "Create new file" — pin target
-                # to this new note so subsequent captures append to it.
+            if (target and target.get("create_new_pending")) or create_new:
                 target_state.set_target(note["id"])
                 await broadcast_fn({
                     "type": "target",
@@ -236,8 +269,6 @@ async def process_note(system_audio, command_audio, broadcast_fn,
                     "title": note["title"],
                 })
             elif target_was_stale:
-                # Pinned target's note was deleted while we were pinned.
-                # Reset to default and tell the bubble.
                 target_state.clear_target()
                 await broadcast_fn({
                     "type": "target",
