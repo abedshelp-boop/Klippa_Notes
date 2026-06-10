@@ -48,11 +48,22 @@ async def init_db():
                 "REFERENCES groups(id) ON DELETE SET NULL"
             )
 
+        # Quick Inbox singleton flag — set on the one special inbox note so
+        # we can find it via SELECT and protect it from deletion.
+        if "is_quick_inbox" not in columns:
+            await db.execute(
+                "ALTER TABLE notes ADD COLUMN is_quick_inbox INTEGER DEFAULT 0"
+            )
+
         await db.execute(
             "CREATE INDEX IF NOT EXISTS idx_groups_parent ON groups(parent_id)"
         )
         await db.execute(
             "CREATE INDEX IF NOT EXISTS idx_notes_group ON notes(group_id)"
+        )
+        await db.execute(
+            "CREATE INDEX IF NOT EXISTS idx_notes_quick_inbox "
+            "ON notes(is_quick_inbox) WHERE is_quick_inbox = 1"
         )
 
         await db.commit()
@@ -104,10 +115,60 @@ async def get_note(note_id: str) -> dict | None:
 
 
 async def delete_note(note_id: str) -> bool:
+    """Delete a note. Refuses to delete the Quick Inbox (returns False)."""
     async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        cursor = await db.execute(
+            "SELECT is_quick_inbox FROM notes WHERE id = ?", (note_id,)
+        )
+        row = await cursor.fetchone()
+        if row and (row["is_quick_inbox"] or 0):
+            # Quick Inbox is protected — undeletable singleton.
+            return False
         cursor = await db.execute("DELETE FROM notes WHERE id = ?", (note_id,))
         await db.commit()
         return cursor.rowcount > 0
+
+
+async def get_quick_inbox() -> dict | None:
+    """Return the Quick Inbox note (singleton) or None if it doesn't exist yet."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        cursor = await db.execute(
+            "SELECT * FROM notes WHERE is_quick_inbox = 1 LIMIT 1"
+        )
+        row = await cursor.fetchone()
+        return _row_to_dict(row) if row else None
+
+
+async def create_quick_inbox() -> dict:
+    """Create the Quick Inbox note. Caller (quick_inbox.ensure_quick_inbox)
+    is responsible for the get-then-create guard to avoid creating two."""
+    note_id = str(uuid.uuid4())
+    now = datetime.now(timezone.utc).isoformat()
+    note = {
+        "id": note_id,
+        "title": "Quick Inbox",
+        "content": "",
+        "tags": json.dumps(["inbox"]),
+        "source": "deen://quick-inbox",
+        "video_url": "",
+        "group_id": None,
+        "is_quick_inbox": 1,
+        "created_at": now,
+        "updated_at": now,
+    }
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute(
+            "INSERT INTO notes (id, title, content, tags, source, video_url, "
+            "group_id, is_quick_inbox, created_at, updated_at) "
+            "VALUES (:id, :title, :content, :tags, :source, :video_url, "
+            ":group_id, :is_quick_inbox, :created_at, :updated_at)",
+            note,
+        )
+        await db.commit()
+    note["tags"] = ["inbox"]
+    return note
 
 
 async def search_notes(query: str) -> list:
@@ -295,4 +356,7 @@ def _row_to_dict(row) -> dict:
         # default to [] silently. Fires on every legacy row read — a log
         # here would be pure noise.
         d["tags"] = []
+    # Default the Quick Inbox flag to 0 for legacy rows that pre-date the
+    # column — SQLite returns NULL there, but the API contract is integer.
+    d["is_quick_inbox"] = int(d.get("is_quick_inbox") or 0)
     return d
