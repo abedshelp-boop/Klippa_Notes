@@ -1,12 +1,23 @@
 """
 AI client for Deen-Notes.
 
-- Transcription: smart-routed between AssemblyAI Universal-3 Pro (for English
-  audio — keeps Islamic-vocabulary Keyterms Prompting + speaker diarization)
-  and OpenAI gpt-4o-mini-transcribe (for Arabic and other non-English content,
-  since Universal-3 Pro only supports EN/ES/DE/FR/PT/IT). A short whisper-1
-  probe on the system audio picks the engine.
-- Note generation: OpenAI GPT-4o-mini with the Deen-Notes system prompt.
+Transcription chain (Sub-project 4 — supersedes the AssemblyAI / Whisper
+smart-routing from the previous release):
+  1. Deepgram Nova-3 (primary)        — multilingual, diarization, smart-format.
+  2. faster-whisper "small" on CPU    — fully offline fallback when Deepgram is
+                                        unreachable or `DEEPGRAM_API_KEY` is unset.
+  3. Legacy OpenAI / AssemblyAI path  — final safety net so existing keys keep
+                                        working if neither Deepgram nor whisper-
+                                        local is installed yet.
+
+Each tier raises a typed exception (DeepgramUnavailable, WhisperUnavailable) so
+the chain falls through deterministically; only the legacy tier's failure is
+propagated to the caller.
+
+Note generation: OpenAI gpt-4.1 with the Deen-Notes system prompt. The push-
+to-talk rewrite prompt gained a SACRED CONTENT section that pins quoted
+strings, code-like identifiers, proper nouns, numbers+units, and URLs to the
+speaker's exact wording.
 """
 import io
 import json
@@ -28,6 +39,11 @@ from config import (
     SMART_ROUTING_ENABLED,
 )
 from debug import debug
+from deepgram_client import DeepgramUnavailable, transcribe_with_deepgram
+from faster_whisper_fallback import (
+    WhisperUnavailable,
+    transcribe_with_local_whisper,
+)
 from keyterms import get_keyterms
 
 
@@ -231,18 +247,46 @@ def _detect_language(wav_bytes: bytes) -> str | None:
 
 
 def transcribe_audio(wav_bytes: bytes, with_speakers: bool = False) -> str:
-    """Transcribe audio with smart engine selection.
+    """Transcribe audio using the layered Deepgram → faster-whisper → legacy chain.
 
-    - Command audio (`with_speakers=False`): always OpenAI Whisper — short,
-      single-speaker, handles any language including Arabic.
-    - System audio (`with_speakers=True`): multi-window whisper-1 probe. Only
-      route to AssemblyAI when the probe is CONFIDENT the audio is English;
-      fall back to OpenAI Whisper for anything else (non-English, ambiguous,
-      or probe failure). AssemblyAI is locked to `language_code="en"`, so
-      routing non-English audio there produces phonetic gibberish — safer
-      default is Whisper, which handles every language natively.
-      Set SMART_ROUTING_ENABLED=false to skip probing and force AssemblyAI.
+    1. **Deepgram Nova-3** is the default. Multilingual, diarization when
+       `with_speakers` is set, smart-format + punctuate on. Skipped if
+       `DEEPGRAM_API_KEY` is absent or the SDK isn't installed.
+    2. **faster-whisper** runs locally on CPU as the offline tier. Used when
+       Deepgram is unreachable (no key, network down, API error). Doesn't
+       diarize — for speaker-labelled output we degrade gracefully to plain
+       text and let the LLM reason without explicit labels.
+    3. **Legacy OpenAI / AssemblyAI** is the safety net: same smart routing
+       the previous release used, kept so installations without either new
+       provider still produce notes. Only this tier's failure is propagated.
+
+    Args:
+        wav_bytes: complete WAV blob (mono, 16-bit PCM preferred).
+        with_speakers: enable speaker diarization where the tier supports it.
     """
+    if not wav_bytes:
+        return ""
+
+    # --- Tier 1: Deepgram Nova-3 -------------------------------------------
+    try:
+        return transcribe_with_deepgram(wav_bytes, with_speakers=with_speakers)
+    except DeepgramUnavailable as e:
+        debug.warn("Deen", "Deepgram unavailable, trying faster-whisper", e)
+
+    # --- Tier 2: faster-whisper (offline) ----------------------------------
+    try:
+        return transcribe_with_local_whisper(wav_bytes)
+    except WhisperUnavailable as e:
+        debug.warn("Deen", "faster-whisper unavailable, falling back to legacy", e)
+
+    # --- Tier 3: legacy AssemblyAI / OpenAI Whisper ------------------------
+    return _legacy_transcribe(wav_bytes, with_speakers=with_speakers)
+
+
+def _legacy_transcribe(wav_bytes: bytes, with_speakers: bool = False) -> str:
+    """Pre-Sub-project-4 transcription path. Kept verbatim so existing
+    OPENAI_API_KEY / ASSEMBLYAI_API_KEY installations still work when neither
+    Deepgram nor faster-whisper is configured."""
     if not with_speakers:
         return _openai_transcribe(wav_bytes)
 
@@ -623,6 +667,27 @@ DO NOT:
 - Hallucinate citations, statistics, or quotes.
 - Add commentary, opening, or closing lines ("Here is the polished version:" — no).
 - Wrap the whole output in code fences.
+
+SACRED CONTENT (always reproduced verbatim, even when the rest is rewritten):
+- QUOTED STRINGS: any span wrapped in "double quotes" or 'single quotes' in \
+the transcript is copied character-for-character — no rephrasing, no \
+translation, no "cleanup" inside. The quotes themselves stay.
+- CODE-LIKE IDENTIFIERS: any token that looks like code — camelCase, \
+snake_case, kebab-case, dotted.path, ALL_CAPS_CONSTANTS, file.ext, \
+function() calls — is reproduced verbatim. Paraphrasing these breaks the \
+thing they identify.
+- PROPER NOUNS & BRAND NAMES: people, places, products, organizations stay \
+exactly as the speaker said them. If the speaker said "GPT-4.1", do NOT \
+write "GPT-4" or "the GPT-4 model". If the speaker said "React Flow", do \
+NOT write "react-flow" or "ReactFlow".
+- NUMBERS + UNITS: numeric values together with their units pass through \
+unchanged — "42 ms", "3.14159", "60 fps", "$15-30/month". Rounding or \
+restating ("about 40 ms", "around $20") is a rewrite, not a preservation.
+- URLs: any http(s)://… or www.… token is copied verbatim. Do NOT shorten, \
+summarize, or replace with link text.
+
+Outside these sacred spans you have the usual rewrite freedom — restructure \
+prose, add headings, etc. — but every sacred span survives the rewrite intact.
 
 LANGUAGE: Detect the dominant language of the dictation and write the note in \
 that language. If the speaker explicitly switches languages, follow them.

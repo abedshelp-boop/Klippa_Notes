@@ -1,0 +1,20 @@
+<svg viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Deen-Notes">
+  <defs>
+    <radialGradient id="deen-bg" cx="32%" cy="28%" r="80%">
+      <stop offset="0%" stop-color="#1a1a1f"/>
+      <stop offset="100%" stop-color="#06060a"/>
+    </radialGradient>
+  </defs>
+  <!-- Dark rounded-square background — cohesive with the bubble's gradient -->
+  <rect x="0" y="0" width="64" height="64" rx="14" ry="14" fill="url(#deen-bg)"/>
+  <!-- Subtle inner rim highlight -->
+  <rect x="0.5" y="0.5" width="63" height="63" rx="13.5" ry="13.5"
+        fill="none" stroke="rgba(255,255,255,0.14)" stroke-width="1"/>
+  <!-- "D" mark — fluid bowl with a clean inner cutout -->
+  <path d="M16 14 H32 A18 18 0 0 1 32 50 H16 Z M22 21 H28 A11 11 0 0 1 28 43 H22 Z"
+        fill="#ffffff" fill-rule="evenodd"/>
+  <!-- Sparkle accent in the upper-right corner (spark of insight) -->
+  <g transform="translate(50 14)" fill="rgba(255,255,255,0.92)">
+    <path d="M0 -3 L1.2 -1.2 L3 0 L1.2 1.2 L0 3 L-1.2 1.2 L-3 0 L-1.2 -1.2 Z"/>
+  </g>
+</svg>

@@ -15,4 +15,10 @@ openwakeword
 pvporcupine>=4.0.0,<5.0.0
 pyaudiowpatch
 rapidfuzz
+# Sub-project 4 — primary transcription provider (Nova-3).
+deepgram-sdk>=5.0.0
+# Sub-project 4 — offline transcription fallback when Deepgram is unreachable.
+faster-whisper
+# Sub-project 4 — local TTS for "Saved to <note>" hear-back confirmations.
+kokoro-onnx
 pytest>=8.0

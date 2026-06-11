@@ -3,7 +3,7 @@ import Sidebar from './components/Sidebar';
 import Toolbar from './components/Toolbar';
 import WindowChrome from './components/WindowChrome';
 import Home from './components/Home';
-import NoteView from './components/NoteView';
+import InnerCanvas from './components/InnerCanvas';
 import Listening from './components/Listening';
 import Settings from './components/Settings';
 import MoveToGroupModal from './components/MoveToGroupModal';
@@ -88,6 +88,43 @@ export default function App() {
     })();
     return () => { cancelled = true; };
   }, [notes.length, updateNoteOnServer]);
+
+  // One-time migration: backfill canvas_state for every note that doesn't
+  // have one yet (canvas redesign sub-project 1). Lossless — each pre-
+  // redesign note becomes a single TextCard at (0,0) holding its existing
+  // content. Idempotent: if all notes already have canvas_state, this is
+  // a no-op + flag set. Same pattern as the titleOverride drain above.
+  useEffect(() => {
+    const FLAG = 'deen.migrate.canvas.v1';
+    if (typeof localStorage === 'undefined') return;
+    if (localStorage.getItem(FLAG) === 'done') return;
+    if (notes.length === 0) return; // wait for first notes load
+
+    let cancelled = false;
+    (async () => {
+      try {
+        // Lazy-import so the migration module isn't in the critical path
+        // when the flag is already set.
+        const { migrateLegacyMarkdown } = await import('./lib/canvas/migrate.js');
+        // useState([]) typed `notes` as never[] in jsconfig strict mode;
+        // re-bind with `any[]` so the loop can read note.canvas_state etc.
+        // without verbose per-line casts. Pre-existing typing gap, not new.
+        /** @type {any[]} */
+        const all = notes;
+        for (const note of all) {
+          if (cancelled) return;
+          if (note.canvas_state != null) continue; // already migrated
+          const next = migrateLegacyMarkdown(note.content || '');
+          await updateNoteOnServer(note.id, { canvas_state: next });
+        }
+        if (!cancelled) localStorage.setItem(FLAG, 'done');
+      } catch (err) {
+        debug.warn('migration', 'canvas_state backfill failed', err);
+        // Don't set the flag — let it retry on next launch.
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [notes.length, updateNoteOnServer]); // notes.length so we don't rerun on every WS update
 
   const clearCapture = useCallback(() => {
     setCapturing(false);
@@ -313,7 +350,7 @@ export default function App() {
               />
             )}
             {view === 'note' && activeNote && (
-              <NoteView
+              <InnerCanvas
                 note={activeNote}
                 onBack={handleBack}
                 onDeletePermanently={deletePermanently}

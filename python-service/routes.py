@@ -3,6 +3,7 @@ import json
 import os
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import Response
 from openai import APIError as OpenAIAPIError
 
 import ai_client
@@ -11,6 +12,7 @@ import database as db
 import language as language_state
 import quick_inbox
 import target as target_state
+import tts_kokoro
 from debug import debug
 from wake_word import get_wake_word_state
 
@@ -180,11 +182,14 @@ async def create_note_route(body: dict):
 
 @app.put("/notes/{note_id}")
 async def update_note_route(note_id: str, body: dict):
-    """Partial update for a note (title / content / tags / source / group_id).
+    """Partial update for a note (title / content / tags / source / group_id /
+    canvas_state).
 
     Any field omitted from the body is left untouched. Pass `"group_id": null`
-    to detach a note from its group. Broadcasts {"type": "note_updated", ...}
-    so the React UI refreshes via useWebSocket.
+    to detach a note from its group. Pass `"canvas_state": null` to clear the
+    canvas state (renderer falls back to the legacy `content` markdown).
+    Broadcasts {"type": "note_updated", ...} so the React UI refreshes via
+    useWebSocket.
     """
     kwargs = {}
     if "title" in body:
@@ -197,6 +202,8 @@ async def update_note_route(note_id: str, body: dict):
         kwargs["source"] = body["source"]
     if "group_id" in body:
         kwargs["group_id"] = body["group_id"]  # may be None to detach
+    if "canvas_state" in body:
+        kwargs["canvas_state"] = body["canvas_state"]  # may be None to clear
 
     note = await db.update_note(note_id, **kwargs)
     if note is None:
@@ -275,7 +282,7 @@ async def delete_group_route(group_id: str):
 @app.post("/transcribe-push-to-talk")
 async def transcribe_push_to_talk(
     file: UploadFile = File(...),
-    mode: str = Form("verbatim"),
+    mode: str = Form("rewrite"),
     note_id: str | None = Form(None),
     append: bool = Form(True),
 ):
@@ -283,7 +290,10 @@ async def transcribe_push_to_talk(
 
     Form fields:
       file       — WAV audio blob recorded in the renderer (mono, 16kHz preferred)
-      mode       — "verbatim" (aggressive cleanup) or "rewrite" (AI restructure)
+      mode       — "rewrite" (Sub-project 4 default — AI restructure with sacred-
+                    content preservation) or "verbatim" (aggressive cleanup
+                    only, no restructuring). The renderer picks the mode based
+                    on the hotkey: Ctrl+Space=rewrite, Shift+Ctrl+Space=verbatim.
       note_id    — target note to append to (required when append=true)
       append     — when true (default), append the polished text to the note
                    and broadcast `note_updated`. When false, just return the
@@ -360,6 +370,34 @@ async def transcribe_push_to_talk(
         "appended_to": appended_to,
         "mode": mode,
     }
+
+
+@app.get("/tts/say")
+async def tts_say(text: str = ""):
+    """Sub-project 4: 1-second hear-back synthesis.
+
+    Renderer calls this after a successful capture so the user gets a spoken
+    "Saved to <note>" without looking at the screen. Returns a `audio/wav`
+    body. Hear-back is best-effort: when Kokoro isn't installed or the model
+    file is missing we return a 503 so the renderer can no-op gracefully —
+    crashing the save path here would be worse than skipping the cue.
+
+    The 200-char cap is a guard against accidental long inputs; the
+    confirmation phrases the spec describes are <30 chars.
+    """
+    phrase = (text or "").strip()
+    if not phrase:
+        return Response(content=b"", media_type="audio/wav")
+    if len(phrase) > 200:
+        phrase = phrase[:200]
+
+    try:
+        wav = await asyncio.to_thread(tts_kokoro.synthesize_to_wav, phrase)
+    except tts_kokoro.TTSUnavailable as e:
+        # Best-effort: 503 (Service Unavailable) is the right signal to the
+        # renderer that this is a no-op condition, not a hard error.
+        raise HTTPException(status_code=503, detail=f"TTS unavailable: {e}") from e
+    return Response(content=wav, media_type="audio/wav")
 
 
 @app.post("/trigger")

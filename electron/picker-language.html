@@ -1,0 +1,131 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body {
+    width: 280px; height: 460px; overflow: hidden;
+    background: transparent; user-select: none;
+    -webkit-font-smoothing: antialiased;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+    color: rgba(255, 255, 255, 0.92);
+  }
+  #panel {
+    position: absolute; inset: 8px;
+    border-radius: 14px;
+    background: rgba(20, 20, 24, 0.92);
+    backdrop-filter: blur(18px);
+    -webkit-backdrop-filter: blur(18px);
+    border: 1px solid rgba(255, 255, 255, 0.10);
+    box-shadow: 0 12px 28px rgba(0, 0, 0, 0.55);
+    display: flex; flex-direction: column;
+    overflow: hidden;
+  }
+  header {
+    padding: 14px 16px 10px;
+    font-size: 13px; font-weight: 600;
+    letter-spacing: 0.02em;
+    color: rgba(255, 255, 255, 0.78);
+    border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  }
+  #list { flex: 1; overflow-y: auto; padding: 6px 6px 10px; }
+  /* Hairline scrollbar to match the existing file picker's visual weight. */
+  #list::-webkit-scrollbar { width: 6px; }
+  #list::-webkit-scrollbar-thumb { background: rgba(255, 255, 255, 0.10); border-radius: 3px; }
+  .row {
+    display: flex; align-items: center; gap: 10px;
+    padding: 10px 12px;
+    border-radius: 10px;
+    cursor: pointer;
+    transition: background 0.12s ease;
+    font-size: 13px;
+    color: rgba(255, 255, 255, 0.88);
+  }
+  .row:hover { background: rgba(255, 255, 255, 0.06); }
+  .row.active {
+    background: rgba(255, 255, 255, 0.08);
+    border-left: 2px solid rgba(255, 255, 255, 0.85);
+    padding-left: 10px;
+  }
+  .emoji { font-size: 18px; line-height: 1; width: 22px; text-align: center; flex: 0 0 22px; }
+  .label { flex: 1; min-width: 0; }
+  .label-title { display: block; }
+  .sublabel {
+    display: block;
+    margin-top: 2px;
+    font-size: 11px;
+    color: rgba(255, 255, 255, 0.55);
+  }
+</style>
+</head>
+<body>
+  <div id="panel">
+    <header>Output language</header>
+    <div id="list"></div>
+  </div>
+
+<script>
+  // Curated list. Global first as the "no-translate, preserve as spoken" default.
+  // English and Arabic are surfaced early because they're the user's primary
+  // languages; the rest is roughly L1-speaker order.
+  const LANGUAGES = [
+    { code: 'auto', label: 'Global',           emoji: '\u{1F30D}', sub: 'as spoken — preserves mixed languages' },
+    { code: 'en',   label: 'English',          emoji: '\u{1F1FA}\u{1F1F8}' },
+    { code: 'ar',   label: 'Arabic',           emoji: '\u{1F1F8}\u{1F1E6}' },
+    { code: 'zh',   label: 'Mandarin Chinese', emoji: '\u{1F1E8}\u{1F1F3}' },
+    { code: 'es',   label: 'Spanish',          emoji: '\u{1F1EA}\u{1F1F8}' },
+    { code: 'hi',   label: 'Hindi',            emoji: '\u{1F1EE}\u{1F1F3}' },
+    { code: 'pt',   label: 'Portuguese',       emoji: '\u{1F1F5}\u{1F1F9}' },
+    { code: 'bn',   label: 'Bengali',          emoji: '\u{1F1E7}\u{1F1E9}' },
+    { code: 'ru',   label: 'Russian',          emoji: '\u{1F1F7}\u{1F1FA}' },
+    { code: 'ja',   label: 'Japanese',         emoji: '\u{1F1EF}\u{1F1F5}' },
+    { code: 'fr',   label: 'French',           emoji: '\u{1F1EB}\u{1F1F7}' },
+  ];
+
+  const list = document.getElementById('list');
+
+  function escapeHtml(s) {
+    return String(s).replace(/[&<>"']/g, (c) => ({
+      '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
+    })[c]);
+  }
+
+  async function render() {
+    let current = { code: 'auto' };
+    try { current = await window.languageAPI.get(); } catch {}
+
+    list.innerHTML = '';
+    for (const lang of LANGUAGES) {
+      const row = document.createElement('div');
+      row.className = 'row' + (lang.code === current.code ? ' active' : '');
+      const sub = lang.sub ? `<span class="sublabel">${escapeHtml(lang.sub)}</span>` : '';
+      row.innerHTML = `
+        <span class="emoji">${escapeHtml(lang.emoji)}</span>
+        <div class="label">
+          <span class="label-title">${escapeHtml(lang.label)}</span>
+          ${sub}
+        </div>
+      `;
+      row.addEventListener('click', async () => {
+        await window.languageAPI.select({
+          code: lang.code, label: lang.label, emoji: lang.emoji,
+        });
+      });
+      list.appendChild(row);
+    }
+  }
+
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') window.languageAPI.close();
+  });
+
+  // Re-render on focus too — covers the case where the active language was
+  // changed via another path (curl, future tray menu) while the window was
+  // open but hidden, then reopened.
+  window.addEventListener('focus', render);
+
+  render();
+</script>
+</body>
+</html>

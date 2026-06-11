@@ -4,247 +4,211 @@
 <meta charset="UTF-8" />
 <style>
   :root {
-    --size: 160px;                           /* visible bubble diameter */
-    --window: 320px;                         /* Electron window size — keep in sync with BUBBLE_WINDOW in main.js */
-    --body: calc(var(--size) * 0.52);        /* sphere diameter */
-    --halo-near: calc(var(--body) + 28px);
-    --halo-far:  calc(var(--body) + 80px);
-    --wave:      calc(var(--body) + 20px);
-    --bob:       calc(var(--size) * -0.025); /* bob amplitude */
+    --window-w: 260px;       /* Electron window width — sync with BUBBLE_WINDOW_W in main.js */
+    --window-h: 140px;       /* Electron window height — sync with BUBBLE_WINDOW_H in main.js */
+    --box: 48px;             /* visible box size — sync with BUBBLE_SIZE in main.js */
+    --right-pad: 26px;       /* gap between box and right edge of window — sync with BUBBLE_RIGHT_PAD */
+    --tooltip-gap: 10px;     /* gap between box and hover tooltip */
+
+    /* Per-state accent colors — kept in CSS vars so the glow/border/dot can
+       all reference the same tint and animations stay synchronized. */
+    --accent-idle:      255, 255, 255;
+    --accent-listening: 120, 210, 255;   /* cool cyan-white */
+    --accent-noting:    255, 190,  90;   /* warm amber */
+    --accent-failed:    255, 140, 110;   /* red-amber */
   }
 
   * { margin: 0; padding: 0; box-sizing: border-box; }
 
   html, body {
-    width: var(--window);
-    height: var(--window);
+    width: var(--window-w);
+    height: var(--window-h);
     overflow: hidden;
     background: transparent;
     user-select: none;
     -webkit-font-smoothing: antialiased;
-  }
-  /* Center the visible bubble inside the oversized transparent window. The
-     extra padding gives pulse halos room to fade past the visible sphere
-     without hitting the window edge (which would clip into a square). */
-  body {
-    display: flex;
-    align-items: center;
-    justify-content: center;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
   }
 
+  /* ── stage anchors the box to the right side of the window ── */
   #stage {
-    width: var(--size);
-    height: var(--size);
-    position: relative;
-    perspective: 900px;
-    animation: bob 5s ease-in-out infinite;
-    cursor: pointer;
-  }
-  #stage[data-phase="listening"],
-  #stage[data-phase="noting"],
-  #stage[data-phase="disconnected"] {
-    animation: none;
-  }
-
-  /* ── ambient glow ── */
-  .glow {
     position: absolute;
-    inset: calc(var(--size) * -0.15);
-    border-radius: 50%;
-    background: radial-gradient(circle, rgba(255,255,255,0.10) 0%, rgba(255,255,255,0.04) 35%, transparent 65%);
-    filter: blur(6px);
-    transform: scale(1);
-    transition: transform 0.6s cubic-bezier(0.22,1,0.36,1);
-    pointer-events: none;
-  }
-  #stage[data-phase="listening"] .glow,
-  #stage[data-phase="noting"] .glow {
-    transform: scale(1.12);
-  }
-
-  /* ── pulse halos ── */
-  .halos {
-    position: absolute;
+    right: var(--right-pad);
     top: 50%;
-    left: 50%;
-    pointer-events: none;
-    transform: translate(-50%, -50%);
+    transform: translateY(-50%);
+    width: var(--box);
+    height: var(--box);
+    /* The CSS var --accent gets swapped per-phase below so all the tinted
+       layers (glow, halo border, sweep) can derive from a single source. */
+    --accent: var(--accent-idle);
   }
-  .halos.near { width: var(--halo-near); height: var(--halo-near); }
-  .halos.far  { width: var(--halo-far);  height: var(--halo-far); }
+  #stage[data-phase="listening"] { --accent: var(--accent-listening); }
+  #stage[data-phase="noting"]    { --accent: var(--accent-noting); }
+
+  /* ── halo rings (outside the box, used for listening/noting pulses) ── */
   .halo-ring {
     position: absolute;
     top: 0; left: 0;
     width: 100%; height: 100%;
-    border-radius: 50%;
-    border: 1px solid rgba(255,255,255,0.55);
+    border-radius: 14px;
+    border: 1px solid rgba(var(--accent), 0.65);
     opacity: 0;
-    transform-origin: center;
+    pointer-events: none;
+    box-shadow: 0 0 12px rgba(var(--accent), 0.30);
   }
   #stage[data-phase="listening"] .halo-ring {
-    animation: pulseRing 2.4s cubic-bezier(0.22,1,0.36,1) infinite;
+    animation: pulseRing 2.0s cubic-bezier(0.22, 1, 0.36, 1) infinite;
   }
   #stage[data-phase="noting"] .halo-ring {
-    animation: pulseRing 3s cubic-bezier(0.22,1,0.36,1) infinite;
+    animation: pulseRing 1.4s cubic-bezier(0.22, 1, 0.36, 1) infinite;
   }
 
-  /* ── ring layers (front / rear) ── */
-  .ring-layer {
+  /* ── outer glow — pulses around the box, tinted per phase.
+        Implemented as a sibling layer (not box-shadow on .box) so it can
+        breathe in opacity/scale without forcing repaints on the box itself. */
+  .glow {
     position: absolute;
-    inset: 0;
+    inset: -22px;
+    border-radius: 28px;
     pointer-events: none;
-    transform-style: preserve-3d;
+    background: radial-gradient(
+      closest-side,
+      rgba(var(--accent), 0.35) 0%,
+      rgba(var(--accent), 0.18) 35%,
+      rgba(var(--accent), 0) 75%
+    );
+    opacity: 0;
+    transition: opacity 0.35s ease;
+    will-change: opacity, transform;
   }
-  .ring-layer.rear  { transform: translateZ(-24px); }
-  .ring-layer.front { transform: translateZ(24px); }
+  #stage[data-phase="idle"] .glow {
+    animation: glowBreathe 4.0s ease-in-out infinite;
+  }
+  #stage[data-phase="listening"] .glow {
+    animation: glowPulseListening 1.4s ease-in-out infinite;
+  }
+  #stage[data-phase="noting"] .glow {
+    animation: glowPulseNoting 1.0s ease-in-out infinite;
+  }
 
-  .ring {
+  /* ── ring-sweep — rotating conic gradient used only during 'noting'.
+        Painted on a sibling layer + rotated via transform (GPU composited)
+        so DWM doesn't repaint on every frame. */
+  .ring-sweep {
     position: absolute;
-    top: 50%; left: 50%;
-    transform-style: preserve-3d;
+    inset: -2px;
+    border-radius: 16px;
     pointer-events: none;
+    background: conic-gradient(
+      from 0deg,
+      rgba(var(--accent), 0) 0%,
+      rgba(var(--accent), 0) 55%,
+      rgba(var(--accent), 0.85) 78%,
+      rgba(var(--accent), 0.10) 92%,
+      rgba(var(--accent), 0) 100%
+    );
+    /* Punch a hole in the center so only the ring shows. */
+    -webkit-mask: radial-gradient(circle, transparent 22px, black 24px);
+            mask: radial-gradient(circle, transparent 22px, black 24px);
+    opacity: 0;
+    will-change: transform, opacity;
   }
-  .ring-spin {
-    width: 100%; height: 100%;
-    border-radius: 50%;
+  #stage[data-phase="noting"] .ring-sweep {
+    opacity: 1;
+    animation: ringSweepSpin 1.2s linear infinite;
+  }
+
+  /* ── idle sheen: extremely slow conic-gradient highlight rotating on
+        a thin border-ring layer so even idle reads "alive". */
+  .idle-sheen {
+    position: absolute;
+    inset: -1px;
+    border-radius: 15px;
+    pointer-events: none;
+    background: conic-gradient(
+      from 0deg,
+      rgba(255, 255, 255, 0)    0%,
+      rgba(255, 255, 255, 0)   60%,
+      rgba(255, 255, 255, 0.22) 80%,
+      rgba(255, 255, 255, 0)   100%
+    );
+    -webkit-mask: radial-gradient(circle, transparent 23px, black 24px);
+            mask: radial-gradient(circle, transparent 23px, black 24px);
+    opacity: 0;
+    will-change: transform, opacity;
+  }
+  #stage[data-phase="idle"] .idle-sheen {
+    opacity: 0.7;
+    animation: idleSheenSpin 12s linear infinite;
+  }
+
+  /* ── the box itself ── */
+  .box {
     position: relative;
-    animation-name: spinY;
-    animation-timing-function: linear;
-    animation-iteration-count: infinite;
-  }
-  .ring-spin.reverse { animation-name: spinYR; }
-
-  .ring-band {
-    position: absolute;
-    inset: 0;
-    border-radius: 50%;
-  }
-  .satellite {
-    position: absolute;
-    top: 50%; left: 0;
-    border-radius: 50%;
-    background: #fff;
-    transform: translate(-50%, -50%);
-    box-shadow: 0 0 8px rgba(255,255,255,0.9);
-  }
-
-  /* ── sphere ── */
-  .sphere {
-    position: absolute;
-    top: 50%; left: 50%;
-    width: var(--body);
-    height: var(--body);
-    border-radius: 50%;
-    transform: translate(-50%, -50%);
-    background: radial-gradient(circle at 32% 28%, #ffffff 0%, #d6d6d6 22%, #0a0a0a 78%);
+    width: 100%;
+    height: 100%;
+    border-radius: 14px;
+    cursor: pointer;
+    background:
+      linear-gradient(135deg, rgba(48, 48, 56, 0.95) 0%, rgba(18, 18, 22, 0.95) 100%);
+    border: 1px solid rgba(255, 255, 255, 0.12);
     box-shadow:
-      0 0 0 1px rgba(255,255,255,0.35),
-      0 0 44px rgba(255,255,255,0.25),
-      inset -10px -14px 32px rgba(0,0,0,0.95),
-      inset 8px 10px 22px rgba(255,255,255,0.55);
+      0 6px 18px rgba(0, 0, 0, 0.45),
+      0 1px 0 rgba(255, 255, 255, 0.05) inset,
+      0 -6px 18px rgba(0, 0, 0, 0.35) inset;
     overflow: hidden;
+    transition: transform 0.16s cubic-bezier(0.22, 1, 0.36, 1),
+                box-shadow 0.25s ease,
+                border-color 0.25s ease;
   }
-  .sphere > div { position: absolute; border-radius: 50%; }
-  .sphere .dots-light {
-    inset: calc(var(--body) * -0.18);
-    background-image: radial-gradient(circle at 2px 2px, #ffffff 2px, transparent 2.5px);
-    background-size: 8px 8px;
-    animation: spinY 28s linear infinite;
-    mix-blend-mode: screen;
+  #stage[data-phase="listening"] .box {
+    border-color: rgba(var(--accent), 0.55);
   }
-  .sphere .dots-dark {
-    inset: calc(var(--body) * -0.12);
-    background-image: radial-gradient(circle at 1px 1px, #000 1px, transparent 1.5px);
-    background-size: 4px 4px;
-    animation: spinYR 45s linear infinite;
-    mix-blend-mode: multiply;
+  #stage[data-phase="noting"] .box {
+    border-color: rgba(var(--accent), 0.40);
   }
-  .sphere .highlight {
-    top: 8%; left: 14%;
-    width: 44%; height: 30%;
-    background: radial-gradient(ellipse, rgba(255,255,255,1), transparent 70%);
-    filter: blur(3px);
+  .box:hover {
+    transform: scale(1.05);
+    border-color: rgba(255, 255, 255, 0.22);
+    box-shadow:
+      0 8px 22px rgba(0, 0, 0, 0.55),
+      0 0 18px rgba(255, 255, 255, 0.10),
+      0 1px 0 rgba(255, 255, 255, 0.08) inset,
+      0 -6px 18px rgba(0, 0, 0, 0.35) inset;
   }
-  .sphere .terminator {
+  .box:active { transform: scale(0.97); }
+
+  /* glass shine on top edge */
+  .box::before {
+    content: '';
+    position: absolute;
     inset: 0;
-    background: radial-gradient(circle at 70% 74%, transparent 38%, rgba(0,0,0,0.8) 80%);
-  }
-  .sphere .sphere-inset {
-    inset: 0;
-    box-shadow: inset 0 0 24px rgba(0,0,0,0.35);
+    border-radius: 14px;
+    background: linear-gradient(180deg, rgba(255, 255, 255, 0.10), transparent 38%);
     pointer-events: none;
   }
-  #stage[data-phase="listening"] .sphere .dots-light { animation-duration: 8s; }
-  #stage[data-phase="listening"] .sphere .dots-dark  { animation-duration: 12.8s; }
-  #stage[data-phase="noting"]    .sphere .dots-light { animation-duration: 5s; }
-  #stage[data-phase="noting"]    .sphere .dots-dark  { animation-duration: 8s; }
 
-  /* ── glass dome ── */
-  .glass-dome {
+  /* ambient inner dot — gives the box "life" without being busy */
+  .dot {
     position: absolute;
     top: 50%; left: 50%;
-    width: var(--body);
-    height: var(--body);
+    width: 6px; height: 6px;
     border-radius: 50%;
+    background: rgba(var(--accent), 0.95);
     transform: translate(-50%, -50%);
-    background: linear-gradient(155deg, rgba(255,255,255,0.22) 0%, rgba(255,255,255,0.02) 45%, rgba(255,255,255,0.10) 100%);
-    border: 1px solid rgba(255,255,255,0.24);
-    box-shadow: inset 0 1px 1px rgba(255,255,255,0.4), inset 0 -6px 14px rgba(0,0,0,0.3);
-    pointer-events: none;
+    box-shadow: 0 0 12px rgba(var(--accent), 0.70);
+    animation: dotBreathe 3.6s ease-in-out infinite;
+  }
+  #stage[data-phase="listening"] .dot { animation: dotPulseListening 0.85s ease-in-out infinite; }
+  #stage[data-phase="noting"]    .dot { animation: dotShimmer 0.55s linear infinite; }
+  #stage[data-phase="disconnected"] .dot {
+    animation: none;
+    opacity: 0.35;
+    background: rgba(255, 255, 255, 0.4);
+    box-shadow: none;
   }
 
-  /* ── waveform ring (listening) ── */
-  .wave-ring {
-    position: absolute;
-    top: 50%; left: 50%;
-    width: var(--wave);
-    height: var(--wave);
-    transform: translate(-50%, -50%);
-    pointer-events: none;
-  }
-  .wave-bar {
-    position: absolute;
-    top: 50%; left: 50%;
-    width: 2px;
-    border-radius: 2px;
-    background: linear-gradient(180deg, rgba(255,255,255,0.95), rgba(255,255,255,0.35));
-    transform-origin: 50% 100%;
-    box-shadow: 0 0 5px rgba(255,255,255,0.6);
-    animation-name: waveBreathe;
-    animation-iteration-count: infinite;
-    animation-timing-function: ease-in-out;
-    animation-direction: alternate;
-  }
-
-  /* ── note ticks (noting) ── */
-  .note-ticks {
-    position: absolute;
-    top: 50%; left: 50%;
-    width: var(--size);
-    height: var(--size);
-    transform: translate(-50%, -50%);
-    pointer-events: none;
-  }
-  .tick-orbit {
-    position: absolute;
-    top: 50%; left: 50%;
-    width: 0; height: 0;
-    animation-name: orbitDot;
-    animation-timing-function: linear;
-    animation-iteration-count: infinite;
-  }
-  .tick-dot {
-    position: absolute;
-    top: 0; left: 0;
-    width: 3px; height: 3px;
-    border-radius: 50%;
-    background: #fff;
-    box-shadow: 0 0 7px rgba(255,255,255,0.85);
-    transform: translate(-50%, -50%);
-    animation: noteBlink 1.5s ease-in-out infinite;
-  }
-
-  /* ── sparkles (noting) ── */
+  /* sparkles — orbiting micro-dots, visible only during 'noting' */
   .sparkles {
     position: absolute;
     inset: 0;
@@ -253,234 +217,185 @@
   .sparkle {
     position: absolute;
     top: 50%; left: 50%;
-    width: 4px; height: 4px;
+    width: 3px; height: 3px;
     border-radius: 50%;
-    background: #fff;
-    box-shadow: 0 0 10px rgba(255,255,255,0.9);
-    animation-name: sparkleBlink;
-    animation-iteration-count: infinite;
-    animation-timing-function: ease-in-out;
+    background: rgb(var(--accent));
+    box-shadow: 0 0 6px rgba(var(--accent), 0.95);
+    opacity: 0;
+    transform: translate(-50%, -50%);
+  }
+  #stage[data-phase="noting"] .sparkle {
+    animation: sparkleSpin 1.6s linear infinite;
   }
 
-  /* ── phase visibility ── */
-  #stage[data-phase="idle"] .wave-ring,
-  #stage[data-phase="idle"] .note-ticks,
-  #stage[data-phase="idle"] .sparkles,
-  #stage[data-phase="idle"] .halos,
-  #stage[data-phase="disconnected"] .wave-ring,
-  #stage[data-phase="disconnected"] .note-ticks,
-  #stage[data-phase="disconnected"] .sparkles,
-  #stage[data-phase="disconnected"] .halos { display: none; }
+  /* ── disconnected: drain color, dim, slow heartbeat so the user knows
+        the app is trying to reconnect (not just frozen). ── */
+  #stage[data-phase="disconnected"] .box {
+    filter: grayscale(1) brightness(0.55);
+    animation: heartbeat 4s ease-in-out infinite;
+  }
 
-  #stage[data-phase="listening"] .note-ticks,
-  #stage[data-phase="listening"] .sparkles { display: none; }
+  /* ── wake-word offline (orthogonal to data-phase, combines with idle/etc.):
+        adds a subtle red-amber tint on top of whatever phase we're in,
+        so the user immediately sees the degraded state without losing the
+        current phase animation. ── */
+  #stage[data-wake="failed"] .glow {
+    background: radial-gradient(
+      closest-side,
+      rgba(var(--accent-failed), 0.32) 0%,
+      rgba(var(--accent-failed), 0.16) 40%,
+      rgba(var(--accent-failed), 0) 78%
+    );
+  }
+  #stage[data-wake="failed"][data-phase="idle"] .glow {
+    animation: glowBreathe 5.0s ease-in-out infinite;
+    opacity: 0.85;
+  }
+  #stage[data-wake="failed"] .dot {
+    background: rgba(var(--accent-failed), 0.95);
+    box-shadow: 0 0 10px rgba(var(--accent-failed), 0.65);
+  }
 
-  #stage[data-phase="noting"] .wave-ring { display: none; }
-
-  #stage[data-phase="disconnected"] { filter: grayscale(1) brightness(0.55); }
-  #stage[data-phase="disconnected"] * { animation-play-state: paused !important; }
+  /* ── hover menu — two clickable rows that replace the old single tooltip ── */
+  #bubble-menu {
+    position: absolute;
+    top: 50%;
+    right: calc(var(--right-pad) + var(--box) + var(--tooltip-gap));
+    transform: translateY(-50%) translateX(6px);
+    padding: 6px;
+    border-radius: 10px;
+    background: rgba(20, 20, 24, 0.94);
+    backdrop-filter: blur(14px);
+    -webkit-backdrop-filter: blur(14px);
+    border: 1px solid rgba(255, 255, 255, 0.10);
+    box-shadow: 0 8px 22px rgba(0, 0, 0, 0.55);
+    color: rgba(255, 255, 255, 0.92);
+    font-size: 12px;
+    font-weight: 500;
+    letter-spacing: 0.02em;
+    white-space: nowrap;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.18s ease, transform 0.18s cubic-bezier(0.22, 1, 0.36, 1);
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
+  #bubble-menu.visible {
+    opacity: 1;
+    transform: translateY(-50%) translateX(0);
+    pointer-events: auto;
+  }
+  #bubble-menu .row {
+    display: flex; align-items: center; gap: 8px;
+    padding: 7px 10px;
+    border-radius: 7px;
+    cursor: pointer;
+    transition: background 0.12s ease;
+  }
+  #bubble-menu .row:hover { background: rgba(255, 255, 255, 0.10); }
+  #bubble-menu .ico { font-size: 14px; line-height: 1; }
+  /* triangle pointer on the right edge */
+  #bubble-menu::after {
+    content: '';
+    position: absolute;
+    right: -5px;
+    top: 50%;
+    transform: translateY(-50%) rotate(45deg);
+    width: 8px; height: 8px;
+    background: rgba(20, 20, 24, 0.94);
+    border-right: 1px solid rgba(255, 255, 255, 0.10);
+    border-top: 1px solid rgba(255, 255, 255, 0.10);
+  }
 
   /* ── keyframes ── */
-  @keyframes spinY  { from { transform: rotate(0deg); }   to { transform: rotate(360deg); } }
-  @keyframes spinYR { from { transform: rotate(360deg); } to { transform: rotate(0deg); } }
-
-  @keyframes bob { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(var(--bob)); } }
-
   @keyframes pulseRing {
-    0%   { transform: scale(1);   opacity: 0.55; }
-    100% { transform: scale(1.6); opacity: 0; }
+    0%   { transform: scale(1);    opacity: 0.75; }
+    100% { transform: scale(1.75); opacity: 0;    }
   }
-
-  @keyframes waveBreathe {
-    from { transform: translate(-50%, -100%) rotate(var(--angle)) translateY(var(--offset)) scaleY(0.85); opacity: 0.8; }
-    to   { transform: translate(-50%, -100%) rotate(var(--angle)) translateY(var(--offset)) scaleY(1.15); opacity: 1; }
+  @keyframes dotBreathe {
+    0%, 100% { opacity: 0.65; transform: translate(-50%, -50%) scale(0.85); }
+    50%      { opacity: 1;    transform: translate(-50%, -50%) scale(1.10); }
   }
-
-  @keyframes orbitDot {
-    from { transform: rotate(0deg)   translateX(var(--r)) rotate(0deg); }
-    to   { transform: rotate(360deg) translateX(var(--r)) rotate(-360deg); }
+  @keyframes dotPulseListening {
+    0%, 100% { opacity: 0.80; transform: translate(-50%, -50%) scale(0.70); }
+    50%      { opacity: 1;    transform: translate(-50%, -50%) scale(1.25); }
   }
-
-  @keyframes noteBlink {
-    0%, 100% { opacity: 0.25; scale: 0.7; }
-    50%      { opacity: 1;    scale: 1; }
+  @keyframes dotShimmer {
+    0%, 100% { opacity: 0.75; transform: translate(-50%, -50%) scale(1);    }
+    50%      { opacity: 1;    transform: translate(-50%, -50%) scale(1.30); }
   }
-
-  @keyframes sparkleBlink {
-    0%, 100% { opacity: 0.25; transform: translate(calc(-50% + var(--sx)), calc(-50% + var(--sy))) scale(0.7); }
-    50%      { opacity: 1;    transform: translate(calc(-50% + var(--sx)), calc(-50% + var(--sy))) scale(1); }
+  @keyframes sparkleSpin {
+    0%   { opacity: 0; transform: rotate(0deg) translateX(14px) rotate(0deg) scale(0.5); }
+    20%  { opacity: 1; }
+    80%  { opacity: 1; }
+    100% { opacity: 0; transform: rotate(360deg) translateX(14px) rotate(-360deg) scale(1); }
+  }
+  @keyframes glowBreathe {
+    0%, 100% { opacity: 0.30; transform: scale(0.92); }
+    50%      { opacity: 0.65; transform: scale(1.05); }
+  }
+  @keyframes glowPulseListening {
+    0%, 100% { opacity: 0.55; transform: scale(0.95); }
+    50%      { opacity: 0.95; transform: scale(1.12); }
+  }
+  @keyframes glowPulseNoting {
+    0%, 100% { opacity: 0.50; transform: scale(0.98); }
+    50%      { opacity: 0.85; transform: scale(1.08); }
+  }
+  @keyframes ringSweepSpin {
+    from { transform: rotate(0deg); }
+    to   { transform: rotate(360deg); }
+  }
+  @keyframes idleSheenSpin {
+    from { transform: rotate(0deg); }
+    to   { transform: rotate(360deg); }
+  }
+  @keyframes heartbeat {
+    0%, 100% { opacity: 0.55; }
+    50%      { opacity: 0.85; }
   }
 </style>
 </head>
 <body>
-  <div id="stage" data-phase="disconnected">
-    <div class="glow"></div>
-    <div class="halos near"></div>
-    <div class="halos far"></div>
-    <div class="ring-layer rear" id="rings-rear"></div>
-    <div class="sphere">
-      <div class="dots-light"></div>
-      <div class="dots-dark"></div>
-      <div class="highlight"></div>
-      <div class="terminator"></div>
-      <div class="sphere-inset"></div>
+  <div id="bubble-menu" aria-hidden="true">
+    <div class="row" data-action="file">
+      <span class="ico">📁</span><span class="lbl">Change file</span>
     </div>
-    <div class="glass-dome"></div>
-    <div class="wave-ring" id="wave-ring"></div>
-    <div class="note-ticks" id="note-ticks"></div>
-    <div class="ring-layer front" id="rings-front"></div>
-    <div class="sparkles" id="sparkles"></div>
+    <div class="row" data-action="lang">
+      <span class="ico">🌐</span><span class="lbl">Change language</span>
+    </div>
+  </div>
+
+  <div id="stage" data-phase="disconnected" data-wake="ok">
+    <div class="glow"></div>
+    <div class="idle-sheen"></div>
+    <div class="halo-ring" style="animation-delay: 0s"></div>
+    <div class="halo-ring" style="animation-delay: 0.7s"></div>
+    <div class="halo-ring" style="animation-delay: 1.4s"></div>
+    <div class="ring-sweep"></div>
+    <div class="box">
+      <div class="dot"></div>
+      <div class="sparkles">
+        <div class="sparkle" style="animation-delay: 0s"></div>
+        <div class="sparkle" style="animation-delay: 0.4s"></div>
+        <div class="sparkle" style="animation-delay: 0.8s"></div>
+        <div class="sparkle" style="animation-delay: 1.2s"></div>
+      </div>
+    </div>
   </div>
 
 <script>
-  // Planet-bubble renderer — vanilla port of Deen-Bubble Claude Design.
-  // Single source of truth for size — keep in sync with --size CSS var
-  // and BUBBLE_SIZE in electron/main.js.
-  const SIZE = 160;
-  const BODY = Math.round(SIZE * 0.52);
-
   const stage = document.getElementById('stage');
+  const box = stage.querySelector('.box');
+  const bubbleMenu = document.getElementById('bubble-menu');
+  const fileRowLabel = bubbleMenu.querySelector('.row[data-action="file"] .lbl');
 
-  // ── halos: 3 staggered pulse rings per layer ──
-  function buildHalos() {
-    document.querySelectorAll('.halos').forEach((layer) => {
-      const count = 3;
-      const dur = 3.0;
-      for (let i = 0; i < count; i++) {
-        const el = document.createElement('div');
-        el.className = 'halo-ring';
-        el.style.animationDelay = (i * (dur / count)) + 's';
-        layer.appendChild(el);
-      }
-    });
-  }
-
-  // ── rings: 3 rear + 4 front, mixed orientations (matches source bubble.jsx:218-256) ──
-  const RINGS = [
-    { layer: 'rear',  scale: 1.00, tilt: 78, roll: 0,   thickness: 1,   dur: 32, reverse: false, opacity: 0.50, dashed: false, satellite: 0, delay: 0  },
-    { layer: 'rear',  scale: 0.90, tilt: 72, roll: -35, thickness: 0.8, dur: 22, reverse: true,  opacity: 0.40, dashed: true,  satellite: 0, delay: -3 },
-    { layer: 'rear',  scale: 0.78, tilt: 18, roll: 70,  thickness: 1,   dur: 18, reverse: false, opacity: 0.45, dashed: false, satellite: 4, delay: -5 },
-    { layer: 'front', scale: 0.98, tilt: 76, roll: 0,   thickness: 2.5, dur: 13, reverse: false, opacity: 0.95, dashed: false, satellite: 5, delay: 0  },
-    { layer: 'front', scale: 1.10, tilt: 70, roll: 38,  thickness: 0.8, dur: 30, reverse: true,  opacity: 0.55, dashed: true,  satellite: 0, delay: -2 },
-    { layer: 'front', scale: 1.04, tilt: 8,  roll: -14, thickness: 1,   dur: 20, reverse: true,  opacity: 0.65, dashed: false, satellite: 4, delay: -6 },
-    { layer: 'front', scale: 0.84, tilt: 74, roll: 0,   thickness: 1.2, dur: 16, reverse: true,  opacity: 0.75, dashed: false, satellite: 0, delay: -4 },
-  ];
-
-  function buildRings() {
-    RINGS.forEach((r) => {
-      const parent = document.getElementById(r.layer === 'rear' ? 'rings-rear' : 'rings-front');
-      const size = Math.max(2, SIZE * r.scale);
-
-      const ring = document.createElement('div');
-      ring.className = 'ring';
-      ring.style.width = size + 'px';
-      ring.style.height = size + 'px';
-      ring.style.transform = `translate(-50%, -50%) rotateZ(${r.roll}deg) rotateX(${r.tilt}deg)`;
-
-      const spin = document.createElement('div');
-      spin.className = 'ring-spin' + (r.reverse ? ' reverse' : '');
-      spin.style.animationDuration = r.dur + 's';
-      if (r.delay) spin.style.animationDelay = r.delay + 's';
-
-      const band = document.createElement('div');
-      band.className = 'ring-band';
-      band.style.border = `${r.thickness}px ${r.dashed ? 'dashed' : 'solid'} transparent`;
-      band.style.backgroundImage =
-        `conic-gradient(from 0deg, ` +
-        `rgba(255,255,255,0) 0%, ` +
-        `rgba(255,255,255,${r.opacity}) 22%, ` +
-        `rgba(255,255,255,${r.opacity * 0.15}) 42%, ` +
-        `rgba(255,255,255,${r.opacity}) 62%, ` +
-        `rgba(255,255,255,0) 82%, ` +
-        `rgba(255,255,255,0) 100%)`;
-      const maskRule = `radial-gradient(closest-side, transparent calc(100% - ${r.thickness}px), #000 calc(100% - ${r.thickness}px + 0.5px))`;
-      band.style.webkitMask = maskRule;
-      band.style.mask = maskRule;
-      band.style.boxShadow = `0 0 12px rgba(255,255,255,${r.opacity * 0.3})`;
-
-      spin.appendChild(band);
-
-      if (r.satellite > 0) {
-        const sat = document.createElement('div');
-        sat.className = 'satellite';
-        sat.style.width = r.satellite + 'px';
-        sat.style.height = r.satellite + 'px';
-        spin.appendChild(sat);
-      }
-
-      ring.appendChild(spin);
-      parent.appendChild(ring);
-    });
-  }
-
-  // ── waveform ring: 42 bars around the sphere ──
-  function buildWave() {
-    const container = document.getElementById('wave-ring');
-    const bars = 42;
-    const waveSize = BODY + 20;
-    const offset = -(waveSize / 2);
-    for (let i = 0; i < bars; i++) {
-      const angle = (i / bars) * 360;
-      const h = 6 + Math.abs(Math.sin(i * 0.9)) * 12;
-      const bar = document.createElement('div');
-      bar.className = 'wave-bar';
-      bar.style.height = h + 'px';
-      bar.style.setProperty('--angle', angle + 'deg');
-      bar.style.setProperty('--offset', offset + 'px');
-      bar.style.animationDuration = (0.7 + (i % 5) * 0.12) + 's';
-      bar.style.animationDelay = (i * 0.025) + 's';
-      container.appendChild(bar);
-    }
-  }
-
-  // ── note ticks: 14 orbit dots at varied radii + blink ──
-  function buildTicks() {
-    const container = document.getElementById('note-ticks');
-    for (let i = 0; i < 14; i++) {
-      const r = BODY / 2 + 12 + (i % 4) * 5;
-      const orbit = document.createElement('div');
-      orbit.className = 'tick-orbit';
-      orbit.style.setProperty('--r', r + 'px');
-      orbit.style.animationDuration = (5 + (i % 4)) + 's';
-      orbit.style.animationDelay = (i * 0.15) + 's';
-
-      const dot = document.createElement('div');
-      dot.className = 'tick-dot';
-      dot.style.animationDelay = (i * 0.1) + 's';
-
-      orbit.appendChild(dot);
-      container.appendChild(orbit);
-    }
-  }
-
-  // ── sparkles: 6 blinking dots around outer edge ──
-  function buildSparkles() {
-    const container = document.getElementById('sparkles');
-    for (let i = 0; i < 6; i++) {
-      const angle = (i / 6) * Math.PI * 2;
-      const r = SIZE * 0.45;
-      const sp = document.createElement('div');
-      sp.className = 'sparkle';
-      sp.style.setProperty('--sx', (Math.cos(angle) * r) + 'px');
-      sp.style.setProperty('--sy', (Math.sin(angle) * r * 0.32) + 'px');
-      sp.style.animationDuration = (1 + i * 0.2) + 's';
-      sp.style.animationDelay = (i * 0.15) + 's';
-      container.appendChild(sp);
-    }
-  }
-
-  buildHalos();
-  buildRings();
-  buildWave();
-  buildTicks();
-  buildSparkles();
-
-  // ─────────────────────────────────────────────────────────
-  // WebSocket sync — server vocab → design phase remap.
-  // Server emits: listening / command / processing.
-  // Client synthesizes 'disconnected' locally when WS closes.
-  // ─────────────────────────────────────────────────────────
-  const WS_URL = 'ws://localhost:8765/ws';
+  // ─── WebSocket: subscribe to status + target changes ────────────────────
+  // 127.0.0.1 (not "localhost") because Python binds to 127.0.0.1 (FASTAPI_HOST
+  // in config.py). On Win11 "localhost" resolves to ::1 first and would skip
+  // straight past our IPv4-only server if anything else were bound to ::1:8765.
+  const WS_URL = 'ws://127.0.0.1:8765/ws';
   const RECONNECT_DELAY = 3000;
   const DRAG_THRESHOLD = 4;
 
@@ -505,15 +420,18 @@
   let ws = null;
   let reconnectTimer = null;
   let prevServerState = null;
+  // Default tooltip — flips to the wake-word warning if Python tells us the
+  // listener died at startup. Kept in JS so the warning can include the
+  // actual error in a title attribute for hover-inspection.
+  const TOOLTIP_DEFAULT = 'Change file';
+  const TOOLTIP_WAKE_OFFLINE = 'Wake word offline · Ctrl+Shift+N';
 
   function setStatus(serverState) {
     const phase = SERVER_TO_PHASE[serverState] || 'disconnected';
     stage.setAttribute('data-phase', phase);
 
     if (serverState !== prevServerState) {
-      if (serverState === 'command') {
-        playChime();
-      } else if (serverState === 'processing') {
+      if (serverState === 'command' || serverState === 'processing') {
         playChime();
       } else if (serverState === 'listening' && prevServerState === 'processing') {
         playChime();
@@ -522,22 +440,43 @@
     prevServerState = serverState;
   }
 
+  function setWakeWordState(status, error) {
+    // "listening" is the only healthy state Python reports for the wake-word
+    // thread. Anything else — failed, initializing-and-stuck, not_started —
+    // means the user can't say "Hey Deen" and needs to know.
+    const ok = status === 'listening';
+    stage.setAttribute('data-wake', ok ? 'ok' : 'failed');
+    // The "Change file" row in the hover menu doubles as a wake-word health
+    // hint when the listener is down — keeps surface area minimal.
+    if (fileRowLabel) {
+      fileRowLabel.textContent = ok ? TOOLTIP_DEFAULT : TOOLTIP_WAKE_OFFLINE;
+    }
+    if (!ok && error) {
+      bubbleMenu.title = error;  // hover for full error text
+    } else {
+      bubbleMenu.removeAttribute('title');
+    }
+  }
+
   function connect() {
     if (ws && (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING)) return;
 
     try {
       ws = new WebSocket(WS_URL);
 
-      ws.onopen = () => {
-        setStatus('listening');
-      };
+      ws.onopen = () => { setStatus('listening'); };
 
       ws.onmessage = (e) => {
         try {
           const msg = JSON.parse(e.data);
           if (msg.type === 'status') {
             setStatus(msg.status);
+          } else if (msg.type === 'wake_word_state') {
+            setWakeWordState(msg.status, msg.error);
           }
+          // Other messages (target, note, note_updated) are ignored here —
+          // the picker reads /target on open, so the bubble doesn't need
+          // to render filename state anywhere.
         } catch {}
       };
 
@@ -548,9 +487,7 @@
         reconnectTimer = setTimeout(connect, RECONNECT_DELAY);
       };
 
-      ws.onerror = () => {
-        ws.close();
-      };
+      ws.onerror = () => { ws.close(); };
     } catch {
       setStatus('disconnected');
       clearTimeout(reconnectTimer);
@@ -558,35 +495,46 @@
     }
   }
 
-  // ─── Click-through toggle ───────────────────────────────
-  // Window starts in setIgnoreMouseEvents(true, {forward:true}) — clicks on
-  // the transparent padding pass through to apps behind. We listen to
-  // forwarded mousemove and flip interactivity on/off based on whether the
-  // cursor is inside the visible circular stage.
+  // ─── Click-through: forward mousemove keeps firing while transparent,
+  //     and we only "claim" mouse events when the cursor enters the box
+  //     rectangle OR the menu. Everything outside both stays click-through.
   let interactive = false;
+  function pointInRect(x, y, rect) {
+    return x >= rect.left && x <= rect.right &&
+           y >= rect.top  && y <= rect.bottom;
+  }
   function updateInteractive(e) {
-    if (isDragging) return; // keep it sticky while dragging
-    const rect = stage.getBoundingClientRect();
-    const cx = rect.left + rect.width / 2;
-    const cy = rect.top + rect.height / 2;
-    const dx = e.clientX - cx;
-    const dy = e.clientY - cy;
-    const r = rect.width / 2;
-    const inside = (dx * dx + dy * dy) <= r * r;
+    if (isDragging) return;
+    const boxRect = box.getBoundingClientRect();
+    const menuRect = bubbleMenu.getBoundingClientRect();
+    const inBox  = pointInRect(e.clientX, e.clientY, boxRect);
+    // Menu rect is only meaningful when the menu is visible — when hidden
+    // its bounding rect is still valid but we ignore it so a hover in the
+    // void to the left of the bubble doesn't unintentionally claim input.
+    const menuVisible = bubbleMenu.classList.contains('visible');
+    const inMenu = menuVisible && pointInRect(e.clientX, e.clientY, menuRect);
+    const inside = inBox || inMenu;
     if (inside !== interactive) {
       interactive = inside;
       window.bubbleAPI?.setInteractive(inside);
     }
+    // Show menu whenever cursor is on the box. Keep it shown while inside
+    // the menu too. Hide once cursor leaves both.
+    if (inBox || inMenu) {
+      bubbleMenu.classList.add('visible');
+    } else {
+      bubbleMenu.classList.remove('visible');
+    }
   }
   document.addEventListener('mousemove', updateInteractive);
 
-  // ─── Drag + Click (unchanged behavior) ───────────────────
+  // ─── Drag + click ────────────────────────────────────────────────────
   let isDragging = false;
   let dragStartX = 0;
   let dragStartY = 0;
   let hasMoved = false;
 
-  stage.addEventListener('mousedown', (e) => {
+  box.addEventListener('mousedown', (e) => {
     if (e.button === 2) return;
     isDragging = true;
     hasMoved = false;
@@ -595,16 +543,19 @@
     e.preventDefault();
   });
 
+  // Right-click anywhere on the box opens the main notes window.
+  box.addEventListener('contextmenu', (e) => {
+    e.preventDefault();
+    window.bubbleAPI?.showMainWindow();
+  });
+
   document.addEventListener('mousemove', (e) => {
     if (!isDragging) return;
-
     const dx = e.screenX - dragStartX;
     const dy = e.screenY - dragStartY;
-
     if (!hasMoved && (Math.abs(dx) > DRAG_THRESHOLD || Math.abs(dy) > DRAG_THRESHOLD)) {
       hasMoved = true;
     }
-
     if (hasMoved) {
       window.bubbleAPI?.moveBubble(dx, dy);
       dragStartX = e.screenX;
@@ -612,12 +563,30 @@
     }
   });
 
+  // Menu rows: clicking either row routes to the appropriate picker.
+  // Bound directly on the rows (not delegated through the box's mouseup)
+  // because the row click happens entirely inside #bubble-menu, separate
+  // from the box's drag-vs-click state machine below.
+  bubbleMenu.querySelectorAll('.row').forEach((row) => {
+    row.addEventListener('click', () => {
+      const action = row.getAttribute('data-action');
+      bubbleMenu.classList.remove('visible');
+      if (action === 'lang')      window.bubbleAPI?.openLangPicker();
+      else                         window.bubbleAPI?.openPicker();
+    });
+  });
+
   document.addEventListener('mouseup', (e) => {
     if (!isDragging) return;
     isDragging = false;
-
+    // Plain click on the box (NOT on a menu row) opens the file picker —
+    // preserves the muscle memory from before the hover menu existed.
     if (!hasMoved && e.button === 0) {
-      window.bubbleAPI?.showMainWindow();
+      const onMenu = e.target.closest && e.target.closest('#bubble-menu');
+      if (!onMenu) {
+        bubbleMenu.classList.remove('visible');
+        window.bubbleAPI?.openPicker();
+      }
     }
   });
 
