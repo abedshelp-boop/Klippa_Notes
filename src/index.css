@@ -2165,6 +2165,41 @@ body::before {
   text-align: left;
 }
 
+/* Sub-project 5: Quick Inbox — pinned, always-there voice-capture target. */
+.sidebar-quick-inbox {
+  all: unset;
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  box-sizing: border-box;
+  padding: 9px 12px;
+  margin: 0 0 10px;
+  border: 1px solid rgba(120, 210, 255, 0.22);
+  border-radius: 10px;
+  background: linear-gradient(135deg, rgba(120, 210, 255, 0.12), rgba(120, 210, 255, 0.03));
+  font-size: 13px;
+  color: var(--ink-0);
+  cursor: pointer;
+  transition: background 120ms, border-color 120ms;
+}
+
+.sidebar-quick-inbox:hover {
+  background: linear-gradient(135deg, rgba(120, 210, 255, 0.18), rgba(120, 210, 255, 0.06));
+  border-color: rgba(120, 210, 255, 0.4);
+}
+
+.sidebar-quick-inbox-icon {
+  font-size: 15px;
+  line-height: 1;
+}
+
+.sidebar-quick-inbox-label {
+  flex: 1;
+  text-align: left;
+  font-weight: 500;
+}
+
 .home-new-note-btn {
   all: unset;
   display: inline-flex;

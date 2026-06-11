@@ -6,7 +6,7 @@
   * { margin: 0; padding: 0; box-sizing: border-box; }
 
   html, body {
-    width: 300px;
+    width: 360px;
     height: 480px;
     overflow: hidden;
     background: transparent;
@@ -16,10 +16,10 @@
     color: #fff;
   }
 
-  .panel {
+  .picker-panel {
     width: 100%;
     height: 100%;
-    background: rgba(20, 20, 24, 0.92);
+    background: rgba(20, 20, 24, 0.94);
     backdrop-filter: blur(20px);
     -webkit-backdrop-filter: blur(20px);
     border: 1px solid rgba(255, 255, 255, 0.10);
@@ -32,203 +32,180 @@
       inset 0 1px 0 rgba(255, 255, 255, 0.06);
   }
 
-  .header {
-    padding: 14px 16px 8px;
+  .picker-header {
+    padding: 12px 16px 8px;
     font-size: 11px;
     font-weight: 600;
     letter-spacing: 0.08em;
     text-transform: uppercase;
     color: rgba(255, 255, 255, 0.55);
+    flex-shrink: 0;
   }
 
-  .new-row {
-    margin: 0 10px 6px;
+  /* Sticky Quick Inbox target — always the first, always-there destination. */
+  .picker-inbox-row {
+    margin: 0 10px 8px;
+    padding: 12px 14px;
+    border-radius: 10px;
+    background: linear-gradient(135deg, rgba(120, 210, 255, 0.18), rgba(120, 210, 255, 0.04));
+    border: 1px solid rgba(120, 210, 255, 0.28);
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    transition: background 0.12s ease, transform 0.08s ease;
+    flex-shrink: 0;
+  }
+  .picker-inbox-row:hover {
+    background: linear-gradient(135deg, rgba(120, 210, 255, 0.24), rgba(120, 210, 255, 0.08));
+  }
+  .picker-inbox-row:active { transform: scale(0.985); }
+  .picker-inbox-row.active {
+    border-color: rgba(120, 210, 255, 0.6);
+    box-shadow: 0 0 0 1px rgba(120, 210, 255, 0.4) inset;
+  }
+  .picker-inbox-icon { font-size: 18px; line-height: 1; }
+  .picker-inbox-text {
+    font-size: 13px;
+    font-weight: 600;
+    color: rgba(255, 255, 255, 0.95);
+  }
+  .picker-inbox-hint {
+    font-size: 11px;
+    color: rgba(255, 255, 255, 0.5);
+    margin-left: auto;
+  }
+
+  .picker-grid-scroll {
+    flex: 1;
+    overflow-y: auto;
+    padding: 4px 10px 10px;
+  }
+  .picker-grid-scroll::-webkit-scrollbar { width: 6px; }
+  .picker-grid-scroll::-webkit-scrollbar-track { background: transparent; }
+  .picker-grid-scroll::-webkit-scrollbar-thumb {
+    background: rgba(255, 255, 255, 0.12);
+    border-radius: 3px;
+  }
+
+  .picker-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px;
+  }
+
+  /* Mini "pinboard snapshot" cards — a glanceable mirror of the home canvas. */
+  .picker-card {
+    padding: 10px;
+    border-radius: 8px;
+    background: rgba(255, 255, 255, 0.05);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    cursor: pointer;
+    height: 92px;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+    transition: background 0.12s ease, border-color 0.12s ease, transform 0.08s ease;
+  }
+  .picker-card:hover {
+    background: rgba(255, 255, 255, 0.09);
+    border-color: rgba(255, 255, 255, 0.18);
+  }
+  .picker-card:active { transform: scale(0.985); }
+  .picker-card.active {
+    border-color: rgba(255, 255, 255, 0.35);
+    background: rgba(255, 255, 255, 0.12);
+  }
+  .picker-card-title {
+    font-size: 12px;
+    font-weight: 600;
+    color: rgba(255, 255, 255, 0.95);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    margin-bottom: 4px;
+  }
+  .picker-card-preview {
+    font-size: 10px;
+    color: rgba(255, 255, 255, 0.5);
+    line-height: 1.3;
+    flex: 1;
+    overflow: hidden;
+    display: -webkit-box;
+    -webkit-line-clamp: 3;
+    -webkit-box-orient: vertical;
+  }
+  .picker-card-time {
+    font-size: 9px;
+    color: rgba(255, 255, 255, 0.35);
+    margin-top: 4px;
+  }
+
+  .picker-new-row {
+    margin: 8px 10px 10px;
     padding: 10px 12px;
     border-radius: 10px;
     background: linear-gradient(135deg, rgba(255,255,255,0.10), rgba(255,255,255,0.04));
     border: 1px solid rgba(255, 255, 255, 0.14);
     color: #fff;
-    font-size: 13px;
+    font-size: 12px;
     font-weight: 500;
     display: flex;
     align-items: center;
     gap: 10px;
     cursor: pointer;
-    transition: background 0.12s ease, transform 0.08s ease;
+    flex-shrink: 0;
+    transition: background 0.12s ease;
   }
-  .new-row:hover {
-    background: linear-gradient(135deg, rgba(255,255,255,0.16), rgba(255,255,255,0.07));
-  }
-  .new-row:active { transform: scale(0.985); }
-  .new-row .plus {
+  .picker-new-row:hover { background: linear-gradient(135deg, rgba(255,255,255,0.16), rgba(255,255,255,0.07)); }
+  .picker-plus {
     width: 18px; height: 18px;
     border-radius: 50%;
     background: rgba(255, 255, 255, 0.15);
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    font-size: 14px;
-    line-height: 1;
-    color: rgba(255, 255, 255, 0.9);
+    display: flex; align-items: center; justify-content: center;
+    font-size: 14px; line-height: 1;
   }
 
-  .divider {
-    height: 1px;
-    background: rgba(255, 255, 255, 0.06);
-    margin: 6px 16px 4px;
-  }
-
-  .list {
-    flex: 1;
-    overflow-y: auto;
-    padding: 4px 6px 8px;
-  }
-  .list::-webkit-scrollbar { width: 6px; }
-  .list::-webkit-scrollbar-track { background: transparent; }
-  .list::-webkit-scrollbar-thumb {
-    background: rgba(255, 255, 255, 0.12);
-    border-radius: 3px;
-  }
-
-  .row {
-    padding: 9px 10px;
-    margin: 1px 4px;
-    border-radius: 8px;
-    cursor: pointer;
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    transition: background 0.1s ease;
-    position: relative;
-  }
-  .row:hover { background: rgba(255, 255, 255, 0.07); }
-  .row.active {
-    background: rgba(255, 255, 255, 0.10);
-  }
-  .row.active::before {
-    content: '';
-    position: absolute;
-    left: 0; top: 8px; bottom: 8px;
-    width: 2px;
-    border-radius: 2px;
-    background: #fff;
-  }
-
-  .row .title {
-    flex: 1;
-    min-width: 0;
-    font-size: 13px;
-    color: rgba(255, 255, 255, 0.92);
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-  }
-  .row .time {
-    font-size: 11px;
-    color: rgba(255, 255, 255, 0.40);
-    flex-shrink: 0;
-  }
-
-  .empty {
-    padding: 24px 16px;
+  .picker-empty {
+    grid-column: 1 / -1;
+    padding: 32px 16px;
     text-align: center;
     color: rgba(255, 255, 255, 0.45);
     font-size: 12px;
     font-style: italic;
   }
-
-  /* Phase 10: tree styling for groups + nested notes */
-  .group-row {
-    padding: 7px 10px;
-    margin: 1px 4px;
-    border-radius: 8px;
-    cursor: pointer;
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    transition: background 0.1s ease;
-  }
-  .group-row:hover { background: rgba(255, 255, 255, 0.05); }
-
-  .group-chevron {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    width: 14px;
-    height: 14px;
-    flex-shrink: 0;
-    color: rgba(255, 255, 255, 0.4);
-    font-size: 10px;
-    transition: transform 0.12s ease;
-  }
-  .group-chevron.open { transform: rotate(90deg); }
-  .group-folder-icon {
-    flex-shrink: 0;
-    color: rgba(255, 255, 255, 0.55);
-    font-size: 11px;
-  }
-  .group-name {
-    flex: 1;
-    min-width: 0;
-    font-size: 12px;
-    font-weight: 500;
-    color: rgba(255, 255, 255, 0.88);
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    letter-spacing: 0.01em;
-  }
-  .group-count {
-    font-size: 10px;
-    color: rgba(255, 255, 255, 0.35);
-    flex-shrink: 0;
-  }
-
-  .ungrouped-header {
-    padding: 10px 16px 4px;
-    font-size: 10px;
-    font-weight: 600;
-    letter-spacing: 0.08em;
-    text-transform: uppercase;
-    color: rgba(255, 255, 255, 0.35);
-  }
-
-  .group-children {
-    overflow: hidden;
-  }
 </style>
 </head>
 <body>
-  <div class="panel">
-    <div class="header">Save notes to</div>
+  <div class="picker-panel">
+    <div class="picker-header">Save notes to</div>
 
-    <div class="new-row" id="new-row" title="Auto-create on the next capture, and route captures there">
-      <span class="plus">+</span>
-      <span>Create new file (on next capture)</span>
+    <div class="picker-inbox-row" id="inbox-row">
+      <span class="picker-inbox-icon">📥</span>
+      <span class="picker-inbox-text">Quick Inbox</span>
+      <span class="picker-inbox-hint">always there</span>
     </div>
 
-    <div class="new-row" id="new-empty" title="Create an empty note now and open it for typing">
-      <span class="plus">+</span>
+    <div class="picker-grid-scroll">
+      <div class="picker-grid" id="grid">
+        <div class="picker-empty">Loading…</div>
+      </div>
+    </div>
+
+    <div class="picker-new-row" id="new-empty" title="Create an empty note now and open it for typing">
+      <span class="picker-plus">+</span>
       <span>Create empty note</span>
-    </div>
-
-    <div class="divider"></div>
-
-    <div class="list" id="list">
-      <div class="empty">Loading…</div>
     </div>
   </div>
 
 <script>
-  const listEl = document.getElementById('list');
-  const newRow = document.getElementById('new-row');
+  const gridEl = document.getElementById('grid');
+  const inboxRow = document.getElementById('inbox-row');
   const newEmptyRow = document.getElementById('new-empty');
 
-  function relativeTime(iso) {
+  function relTime(iso) {
     if (!iso) return '';
-    const then = new Date(iso).getTime();
-    const now = Date.now();
-    const sec = Math.max(0, Math.round((now - then) / 1000));
+    const sec = Math.max(0, Math.round((Date.now() - new Date(iso).getTime()) / 1000));
     if (sec < 60) return 'just now';
     const min = Math.round(sec / 60);
     if (min < 60) return min + 'm ago';
@@ -236,191 +213,63 @@
     if (hr < 24) return hr + 'h ago';
     const day = Math.round(hr / 24);
     if (day < 7) return day + 'd ago';
-    const wk = Math.round(day / 7);
-    if (wk < 5) return wk + 'w ago';
     return new Date(iso).toLocaleDateString();
   }
 
-  // Phase 10: persisted expand/collapse state per group.
-  const EXPAND_KEY = 'deen.picker.expandedGroups.v1';
-  function loadExpanded() {
-    try {
-      const raw = localStorage.getItem(EXPAND_KEY);
-      if (!raw) return new Set();
-      return new Set(JSON.parse(raw));
-    } catch { return new Set(); }
-  }
-  function saveExpanded(set) {
-    try {
-      localStorage.setItem(EXPAND_KEY, JSON.stringify([...set]));
-    } catch {}
-  }
-  const expandedGroups = loadExpanded();
-
-  function buildTree(groups) {
-    const byParent = new Map();
-    const ids = new Set(groups.map((g) => g.id));
-    for (const g of groups) {
-      const key = (g.parent_id && ids.has(g.parent_id)) ? g.parent_id : '__root__';
-      if (!byParent.has(key)) byParent.set(key, []);
-      byParent.get(key).push(g);
-    }
-    const sortNodes = (arr) =>
-      arr.sort((a, b) =>
-        (a.name || '').localeCompare(b.name || '', undefined, { sensitivity: 'base' }),
-      );
-    function build(parentKey) {
-      const arr = byParent.get(parentKey) || [];
-      sortNodes(arr);
-      return arr.map((g) => ({ ...g, children: build(g.id) }));
-    }
-    return build('__root__');
+  function previewText(content) {
+    if (!content) return '';
+    // Strip markdown noise for a glanceable preview.
+    return String(content)
+      .replace(/[#*_>`~\[\]()]/g, '')
+      .replace(/\s+/g, ' ')
+      .trim()
+      .slice(0, 100);
   }
 
-  function descendantIds(node) {
-    const out = new Set();
-    function walk(n) {
-      out.add(n.id);
-      for (const c of n.children) walk(c);
-    }
-    walk(node);
-    return out;
-  }
+  let inboxId = null;
 
-  function createNoteRow(n, activeId) {
-    const row = document.createElement('div');
-    row.className = 'row' + (n.id === activeId ? ' active' : '');
-    row.dataset.id = n.id;
-    row.style.paddingLeft = '10px'; // base indent — overridden when nested
+  function renderCards(snapshot, activeId) {
+    const notes = (snapshot && snapshot.notes) || [];
+    inboxId = snapshot && snapshot.inbox ? snapshot.inbox.id : null;
 
-    const title = document.createElement('div');
-    title.className = 'title';
-    title.textContent = n.title || 'Untitled';
+    // Mark the Quick Inbox row active when it's the current target.
+    inboxRow.classList.toggle('active', !!inboxId && activeId === inboxId);
 
-    const time = document.createElement('div');
-    time.className = 'time';
-    time.textContent = relativeTime(n.updated_at);
-
-    row.appendChild(title);
-    row.appendChild(time);
-    row.addEventListener('click', () => {
-      window.pickerAPI.select(n.id);
-    });
-    return row;
-  }
-
-  function renderGroupNode(node, notes, activeId, depth) {
-    const wrap = document.createElement('div');
-
-    const row = document.createElement('div');
-    row.className = 'group-row';
-    row.style.paddingLeft = (10 + depth * 12) + 'px';
-
-    const chev = document.createElement('span');
-    chev.className = 'group-chevron' + (expandedGroups.has(node.id) ? ' open' : '');
-    chev.textContent = '▶';
-
-    const folder = document.createElement('span');
-    folder.className = 'group-folder-icon';
-    folder.textContent = expandedGroups.has(node.id) ? '📂' : '📁';
-
-    const name = document.createElement('span');
-    name.className = 'group-name';
-    name.textContent = node.name;
-
-    const directNotes = notes.filter((n) => n.group_id === node.id);
-    const descIds = descendantIds(node);
-    const recursiveCount = notes.filter((n) => descIds.has(n.group_id)).length;
-
-    const count = document.createElement('span');
-    count.className = 'group-count';
-    if (recursiveCount > 0) count.textContent = String(recursiveCount);
-
-    row.appendChild(chev);
-    row.appendChild(folder);
-    row.appendChild(name);
-    row.appendChild(count);
-
-    const childrenWrap = document.createElement('div');
-    childrenWrap.className = 'group-children';
-    childrenWrap.style.display = expandedGroups.has(node.id) ? 'block' : 'none';
-
-    // Render subgroups first, then direct notes inside this group.
-    for (const child of node.children) {
-      childrenWrap.appendChild(renderGroupNode(child, notes, activeId, depth + 1));
-    }
-    for (const n of directNotes) {
-      const nrow = createNoteRow(n, activeId);
-      nrow.style.paddingLeft = (10 + (depth + 1) * 12) + 'px';
-      childrenWrap.appendChild(nrow);
-    }
-
-    row.addEventListener('click', () => {
-      if (expandedGroups.has(node.id)) {
-        expandedGroups.delete(node.id);
-        chev.classList.remove('open');
-        folder.textContent = '📁';
-        childrenWrap.style.display = 'none';
-      } else {
-        expandedGroups.add(node.id);
-        chev.classList.add('open');
-        folder.textContent = '📂';
-        childrenWrap.style.display = 'block';
-      }
-      saveExpanded(expandedGroups);
-    });
-
-    wrap.appendChild(row);
-    wrap.appendChild(childrenWrap);
-    return wrap;
-  }
-
-  function render(tree, notes, activeId, createNewPending) {
-    if (createNewPending) {
-      newRow.classList.add('active-pending');
-    }
-
-    listEl.innerHTML = '';
-
-    const totalCount = (notes || []).length;
-    if (totalCount === 0 && (!tree || tree.length === 0)) {
-      listEl.innerHTML = '<div class="empty">No notes yet</div>';
+    if (notes.length === 0) {
+      gridEl.innerHTML = '<div class="picker-empty">No notes yet</div>';
       return;
     }
-
-    // Top: groups (with nested notes inside).
-    for (const node of tree) {
-      listEl.appendChild(renderGroupNode(node, notes, activeId, 0));
-    }
-
-    // Bottom: ungrouped notes — listed inline with the group rows so the
-    // user can pick them without expanding anything.
-    const ungrouped = notes.filter((n) => !n.group_id);
-    if (ungrouped.length > 0) {
-      if (tree.length > 0) {
-        const hdr = document.createElement('div');
-        hdr.className = 'ungrouped-header';
-        hdr.textContent = 'Ungrouped';
-        listEl.appendChild(hdr);
-      }
-      for (const n of ungrouped) {
-        listEl.appendChild(createNoteRow(n, activeId));
-      }
+    gridEl.innerHTML = '';
+    // Recent-first so the picker surfaces what the user most likely wants.
+    const sorted = [...notes].sort((a, b) =>
+      (b.updated_at || '').localeCompare(a.updated_at || '')
+    );
+    for (const n of sorted) {
+      const card = document.createElement('div');
+      card.className = 'picker-card' + (n.id === activeId ? ' active' : '');
+      card.innerHTML =
+        '<div class="picker-card-title"></div>' +
+        '<div class="picker-card-preview"></div>' +
+        '<div class="picker-card-time"></div>';
+      card.querySelector('.picker-card-title').textContent = n.title || 'Untitled';
+      card.querySelector('.picker-card-preview').textContent = previewText(n.content);
+      card.querySelector('.picker-card-time').textContent = relTime(n.updated_at);
+      card.addEventListener('click', () => window.pickerAPI.select(n.id));
+      gridEl.appendChild(card);
     }
   }
 
   async function load() {
-    const [tree, target] = await Promise.all([
-      window.pickerAPI.listTree(),
+    const [snapshot, target] = await Promise.all([
+      window.pickerAPI.getPickerSnapshot(),
       window.pickerAPI.getTarget(),
     ]);
-    const groups = tree?.groups || [];
-    const notes = tree?.notes || [];
-    render(buildTree(groups), notes, target?.note_id, target?.create_new_pending);
+    renderCards(snapshot, target && target.note_id);
   }
 
-  newRow.addEventListener('click', () => {
-    window.pickerAPI.createNew();
+  inboxRow.addEventListener('click', () => {
+    // Route to Quick Inbox = pin the routing target there.
+    if (inboxId) window.pickerAPI.select(inboxId);
   });
 
   newEmptyRow.addEventListener('click', () => {
@@ -431,8 +280,7 @@
     if (e.key === 'Escape') window.pickerAPI.close();
   });
 
-  // Reload list each time the picker is opened (Electron caches the page,
-  // so we listen for window focus to refresh state).
+  // Electron caches the page, so reload state each time the picker is shown.
   window.addEventListener('focus', load);
   load();
 </script>

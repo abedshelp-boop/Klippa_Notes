@@ -5,6 +5,9 @@ contextBridge.exposeInMainWorld('pickerAPI', {
   // Phase 10: fetch notes + groups in a single round-trip so the picker can
   // render the tree without flicker.
   listTree: () => ipcRenderer.invoke('picker:tree'),
+  // Sub-project 5: pinboard snapshot — full notes (with content for previews)
+  // plus the Quick Inbox separately, for the sticky top entry.
+  getPickerSnapshot: () => ipcRenderer.invoke('picker:snapshot'),
   getTarget: () => ipcRenderer.invoke('picker:get-target'),
   select: (noteId) => ipcRenderer.invoke('picker:select', noteId),
   createNew: () => ipcRenderer.invoke('picker:create-new'),

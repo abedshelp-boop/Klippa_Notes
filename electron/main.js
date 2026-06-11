@@ -117,6 +117,13 @@ function createWindow() {
       mainWindow.hide();
     }
   });
+
+  // Keep Python's context_state in sync with window focus/visibility so voice
+  // routing's no-qualifier default knows whether to route to the open note.
+  mainWindow.on('focus', pushContextToPython);
+  mainWindow.on('blur', pushContextToPython);
+  mainWindow.on('show', pushContextToPython);
+  mainWindow.on('hide', pushContextToPython);
 }
 
 // Visible bubble (rounded square) edge length. Sync with --box in bubble.html.
@@ -136,7 +143,8 @@ const BUBBLE_RIGHT_PAD = 26;
 // Picker window — small popover that appears just above the bubble when the
 // user clicks the sphere. Lists existing notes + a "+ Create new file" row.
 // Closes on blur or explicit selection.
-const PICKER_WIDTH = 300;
+// Sub-project 5: wider to fit the 2-column pinboard grid of note mini-cards.
+const PICKER_WIDTH = 360;
 const PICKER_HEIGHT = 480;
 
 function pickerPositionForBubble() {
@@ -298,6 +306,24 @@ function pythonRequest(method, urlPath, body) {
     if (data) req.write(data);
     req.end();
   });
+}
+
+// ── Context tracker: pushes foreground + open-note id to Python so voice
+//    routing can use them as the no-qualifier default ("Hey Deen, [content]"
+//    with main window foreground + a note open → route there). Best-effort —
+//    a failed POST must never break the UI. ─────────────────────────────────
+let _currentOpenNoteId = null;
+
+async function pushContextToPython() {
+  const foreground = !!(mainWindow && mainWindow.isFocused() && mainWindow.isVisible());
+  try {
+    await pythonRequest('POST', '/context', {
+      foreground,
+      open_note_id: foreground ? _currentOpenNoteId : null,
+    });
+  } catch (err) {
+    // Silent — context is best-effort; voice routing falls back gracefully.
+  }
 }
 
 // Push the persisted target into Python on startup. Python's target state
@@ -628,8 +654,24 @@ ipcMain.handle('tts:say', async (_e, text) => {
   }
 });
 
+// ── Context IPC ──────────────────────────────────────────────────────────
+// The renderer calls this whenever the active note changes (open/close).
+ipcMain.handle('context:open-note', (_e, noteId) => {
+  _currentOpenNoteId = noteId || null;
+  return pushContextToPython();
+});
+
 // ── Picker IPC ───────────────────────────────────────────────────────────
 ipcMain.handle('picker:open', () => {
+  // Context-aware default: if the main window is foregrounded AND a note is
+  // open, a bubble click triggers an immediate capture for that note instead
+  // of popping the picker. Matches the spec: "Picker is for desk mode only."
+  const foreground = !!(mainWindow && mainWindow.isFocused() && mainWindow.isVisible());
+  if (foreground && _currentOpenNoteId) {
+    debug.log('Bubble', 'context-aware capture to open note', _currentOpenNoteId);
+    triggerNoteCapture();
+    return;
+  }
   showPicker();
 });
 
@@ -657,6 +699,25 @@ ipcMain.handle('picker:tree', async () => {
   } catch (err) {
     debug.error('Picker', 'tree fetch failed', err.message);
     return { notes: [], groups: [] };
+  }
+});
+
+// Sub-project 5: pinboard-snapshot picker. Returns full notes (with content
+// for previews) plus the Quick Inbox separately so the renderer can pin it at
+// the top regardless of sort order.
+ipcMain.handle('picker:snapshot', async () => {
+  try {
+    const [notes, inbox] = await Promise.all([
+      pythonRequest('GET', '/notes', null),
+      pythonRequest('GET', '/quick-inbox', null),
+    ]);
+    const inboxId = inbox && inbox.id;
+    // Quick Inbox renders as the sticky top card, not in the grid.
+    const regular = (notes || []).filter((n) => n.id !== inboxId);
+    return { inbox: inbox || null, notes: regular };
+  } catch (err) {
+    debug.error('Picker', 'snapshot failed', err.message);
+    return { inbox: null, notes: [] };
   }
 });
 
@@ -827,6 +888,9 @@ app.whenReady().then(() => {
   restoreTargetToPython();
   // Same retry approach for the output-language preference.
   restoreLanguageToPython();
+  // Initial context push so Python reads foreground=true from boot rather
+  // than "false until the user clicks somewhere." Delayed so Python is up.
+  setTimeout(pushContextToPython, 2000);
 });
 
 app.on('will-quit', () => {

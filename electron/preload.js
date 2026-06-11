@@ -23,6 +23,12 @@ contextBridge.exposeInMainWorld('electronAPI', {
     return () => ipcRenderer.removeListener('note:open', handler);
   },
 
+  // Sub-project 5: tell the main process which note (if any) is open, so it
+  // can push foreground + open-note context to the Python service. Voice
+  // routing uses this for the no-qualifier "Hey Deen, [content]" default
+  // (route to the open note instead of Quick Inbox).
+  notifyOpenNote: (noteId) => ipcRenderer.invoke('context:open-note', noteId),
+
   // Sub-project 4: hear-back. The renderer asks for TTS by text, main does
   // the fetch + returns the WAV ArrayBuffer so the renderer can play it via
   // a regular HTMLAudioElement. Returns null on any failure — TTS must

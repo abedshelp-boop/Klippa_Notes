@@ -21,6 +21,7 @@ export default function Sidebar({
   filter,
   onFilterChange,
   onListen,
+  onOpenNote,
   onOpenSettings,
   status,
   capturing,
@@ -31,6 +32,9 @@ export default function Sidebar({
   onRenameGroup,
   onDeleteGroup,
 }) {
+  // Sub-project 5: the Quick Inbox is a permanent, always-there note. Surface
+  // it as a pinned row at the top of the library (hidden in archive view).
+  const quickInbox = notes.find((n) => n.is_quick_inbox);
   const ctrlKey = typeof navigator !== 'undefined' && /Mac/i.test(navigator.platform) ? '⌘' : 'Ctrl';
 
   const nonTrashedCount = notes.filter((n) => !overlay.isTrashed(n.id)).length;
@@ -96,6 +100,17 @@ export default function Sidebar({
         >
           <span className="sidebar-new-note-icon">+</span>
           <span className="sidebar-new-note-label">New note</span>
+        </button>
+      )}
+
+      {quickInbox && filter.type !== 'archive' && (
+        <button
+          className="sidebar-quick-inbox"
+          onClick={() => onOpenNote?.(quickInbox.id)}
+          title="Quick Inbox — voice captures with no destination land here"
+        >
+          <span className="sidebar-quick-inbox-icon">📥</span>
+          <span className="sidebar-quick-inbox-label">Quick Inbox</span>
         </button>
       )}
 
