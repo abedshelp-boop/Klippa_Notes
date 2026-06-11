@@ -310,9 +310,22 @@ async def transcribe_push_to_talk(
     if not raw_text:
         return {"text": "", "raw": "", "appended_to": None, "mode": mode}
 
-    # Stage 2: polish via the chosen mode. The user picked "verbatim" or
-    # "rewrite" in the two-button mic panel BEFORE recording (matches the
-    # "explicit user control" preference from CLAUDE.md).
+    # Voice modifier (Sub-project 4): a spoken "quote:" / "verbatim:" prefix
+    # forces verbatim mode even when the hotkey requested rewrite, and is
+    # stripped so the command word never lands in the saved note. This is the
+    # voice half of the verbatim modifier; the hotkey half is Shift+Ctrl+Space
+    # in the renderer.
+    forced_mode, raw_text = ai_client.parse_voice_modifier(raw_text)
+    if forced_mode:
+        mode = forced_mode
+        debug.log("routes", "voice modifier detected — forcing verbatim")
+        if not raw_text:
+            return {"text": "", "raw": "", "appended_to": None, "mode": mode}
+
+    # Stage 2: polish via the chosen mode. Default is rewrite; the renderer
+    # selects verbatim via Shift+Ctrl+Space, or the voice prefix above forces
+    # it. The mode is always explicit (matches the "explicit user control"
+    # preference from CLAUDE.md).
     lang = language_state.get_language()
     target_code = lang.get("code") if lang else None
     target_label = lang.get("label") if lang else None

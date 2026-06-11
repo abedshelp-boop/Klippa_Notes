@@ -22,6 +22,7 @@ speaker's exact wording.
 import io
 import json
 import os
+import re
 
 import assemblyai as aai
 import soundfile as sf
@@ -580,6 +581,34 @@ Return ONLY valid JSON, no markdown code fences around it."""
 
 
 # ─── Push-to-talk dictation helpers (Phase 6) ────────────────────────────────
+
+
+# Sub-project 4: the voice half of the verbatim modifier. A spoken "quote:" /
+# "verbatim:" at the START of a dictation forces verbatim mode even when the
+# hotkey requested rewrite. Requiring a punctuation separator ([:,.]) after the
+# keyword keeps real commands firing — Deepgram's smart-format renders the
+# natural pause after a spoken "quote" as a comma/period — while avoiding false
+# positives on notes that merely begin with the words "quote"/"verbatim".
+_VOICE_MODIFIER_RE = re.compile(r"^\s*(?:quote|verbatim)\s*[:,.]\s*", re.IGNORECASE)
+
+
+def parse_voice_modifier(text: str) -> tuple[str | None, str]:
+    """Detect a leading "quote:" / "verbatim:" voice command in a transcript.
+
+    Returns ``(mode, stripped_text)``:
+      - ``("verbatim", <text with the prefix removed>)`` when a prefix is found
+      - ``(None, <original text>)`` otherwise
+
+    The prefix is stripped so the command word never lands in the saved note.
+    Detection is intentionally server-side: the transcript only exists after
+    transcription, so this is the only place the spoken modifier can be seen.
+    """
+    if not text:
+        return None, text
+    match = _VOICE_MODIFIER_RE.match(text)
+    if match:
+        return "verbatim", text[match.end():].lstrip()
+    return None, text
 
 
 _VERBATIM_SYSTEM_PROMPT = """You are polishing a single-speaker dictation \
