@@ -40,11 +40,95 @@ stop_event = threading.Event()
 _server_loop = None
 _processing_lock = threading.Lock()
 
+MAX_DISAMBIGUATION_RETRIES = 1  # one extra attempt after the first miss
+
 
 def _broadcast_sync(message: dict):
     """Broadcast a message to all WebSocket clients from a non-async thread."""
     if _server_loop:
         asyncio.run_coroutine_threadsafe(broadcast(message), _server_loop)
+
+
+def run_disambiguation_loop(decision, quick_inbox_id: str):
+    """Voice-only disambiguation: speak the question, listen for a reply,
+    parse yes/no/named, retry once, then fall through to Quick Inbox.
+
+    Returns a RoutingDecision that's always `existing` or `create_new` —
+    caller can save without further prompting.
+    """
+    import voice_routing
+    import tts_client
+    import ai_client
+    from resampler import audio_to_wav_bytes
+
+    if decision.kind != "needs_voice_followup":
+        return decision
+
+    current = decision
+    for attempt in range(MAX_DISAMBIGUATION_RETRIES + 1):
+        tts_client.say(current.question or "Which note?")
+        _broadcast_sync({"type": "status", "status": "command"})
+
+        try:
+            reply_audio = record_command()
+        except (OSError, RuntimeError) as e:
+            debug.error("Disamb", "mic failed mid-loop", e)
+            break
+
+        if reply_audio is None or len(reply_audio) == 0:
+            debug.warn(
+                "Disamb",
+                "no reply, retrying" if attempt == 0 else "still no reply",
+            )
+            continue
+
+        try:
+            wav = audio_to_wav_bytes(reply_audio)
+            transcript = ai_client.transcribe_audio(wav, with_speakers=False) or ""
+        except (OSError, RuntimeError, ValueError) as e:
+            debug.warn("Disamb", "transcription failed", e)
+            continue
+
+        debug.log("Disamb", "reply", transcript[:100])
+        result = voice_routing.parse_response(transcript, current.candidates)
+
+        if result["kind"] == "named":
+            return voice_routing.RoutingDecision(
+                kind="existing",
+                note_id=result["note_id"],
+                content=current.content,
+                confidence="medium",
+            )
+        if result["kind"] == "yes":
+            if current.candidates:
+                return voice_routing.RoutingDecision(
+                    kind="existing",
+                    note_id=current.candidates[0]["id"],
+                    content=current.content,
+                    confidence="medium",
+                )
+            # No candidates → it was the "create one?" prompt. Extract the
+            # proposed title from the question text.
+            import re
+            m = re.search(r"No note called (.+?)\.", current.question or "")
+            title = m.group(1) if m else "Untitled Note"
+            return voice_routing.RoutingDecision(
+                kind="create_new",
+                proposed_title=title.title(),
+                content=current.content,
+                confidence="medium",
+            )
+        if result["kind"] == "no":
+            break  # user rejected — stop looping
+        # unclear → next iteration (if any retries left)
+
+    tts_client.say("Saved to Quick Inbox — couldn't tell where you meant.")
+    return voice_routing.RoutingDecision(
+        kind="existing",
+        note_id=quick_inbox_id,
+        content=current.content,
+        confidence="low",
+    )
 
 
 def on_wake_word_detected():
@@ -120,18 +204,76 @@ def on_wake_word_detected():
             },
         )
 
+        # Voice routing — pre-transcribe the command and decide destination
+        # BEFORE dispatching the heavy process_note pipeline. This lets us
+        # emit disambiguation prompts early without making the user wait.
+        command_text = ""
+        try:
+            from resampler import audio_to_wav_bytes
+            import ai_client
+            cmd_wav = audio_to_wav_bytes(command_audio)
+            command_text = ai_client.transcribe_audio(cmd_wav, False) or ""
+        except (OSError, RuntimeError, ValueError) as e:
+            debug.warn("Main", "command pre-transcribe failed", e)
+
+        routing_decision = None
+        quick_inbox_id = None
         if _server_loop:
+            async def _decide():
+                import database as db
+                import quick_inbox as qi
+                import voice_routing
+                import context_state
+                inbox = await qi.ensure_quick_inbox()
+                notes = await db.get_all_notes()
+                parsed = voice_routing.parse_command(command_text)
+                # Foreground-open-note override for the no-qualifier case:
+                # if user said no qualifier AND main window is foregrounded
+                # with a note open, route there instead of Quick Inbox.
+                if parsed.kind == "inbox":
+                    ctx = context_state.get_context()
+                    if ctx.get("foreground") and ctx.get("open_note_id"):
+                        return inbox["id"], voice_routing.RoutingDecision(
+                            kind="existing",
+                            note_id=ctx["open_note_id"],
+                            content=parsed.content,
+                            confidence="high",
+                        )
+                decision = voice_routing.route(
+                    parsed=parsed,
+                    notes=notes,
+                    quick_inbox_id=inbox["id"],
+                    last_capture=context_state.get_last_capture(),
+                )
+                return inbox["id"], decision
+
+            fut = asyncio.run_coroutine_threadsafe(_decide(), _server_loop)
+            try:
+                quick_inbox_id, routing_decision = fut.result(timeout=10)
+            except Exception as e:  # noqa: BLE001 — degrade for any routing failure
+                debug.warn("Main", "routing decide failed", e)
+                routing_decision = None
+
+            if (routing_decision is not None
+                    and routing_decision.kind == "needs_voice_followup"):
+                routing_decision = run_disambiguation_loop(
+                    routing_decision, quick_inbox_id
+                )
+
             asyncio.run_coroutine_threadsafe(
                 process_note(system_audio, command_audio, broadcast,
                              media_was_paused=media_was_paused,
                              target=frozen_target,
-                             language=frozen_language),
+                             language=frozen_language,
+                             routing_decision=routing_decision,
+                             quick_inbox_id=quick_inbox_id),
                 _server_loop,
             )
             debug.log(
                 "Main",
                 "process_note dispatched",
-                {"media_was_paused": media_was_paused},
+                {"media_was_paused": media_was_paused,
+                 "routing_kind": (routing_decision.kind if routing_decision else None)},
             )
         else:
             debug.warn(

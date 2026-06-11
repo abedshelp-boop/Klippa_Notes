@@ -259,7 +259,24 @@ export default function App() {
     return unsubscribe;
   }, []);
 
+  // Sub-project 5: push the open-note id to electron whenever the active view
+  // changes, so Python's context_state knows whether a no-qualifier "Hey Deen,
+  // [content]" capture should land in the open note (vs. Quick Inbox).
+  useEffect(() => {
+    const api = window.electronAPI;
+    if (!api?.notifyOpenNote) return;
+    const id = view === 'note' ? activeNoteId : null;
+    api.notifyOpenNote(id).catch(() => {});
+  }, [view, activeNoteId]);
+
   const deletePermanently = useCallback(async (id) => {
+    // Sub-project 5: Quick Inbox is undeletable. Don't even attempt the DELETE
+    // — Python returns 409, which we'd only have to render an error for.
+    const target = notes.find((n) => n.id === id);
+    if (target?.is_quick_inbox) {
+      debug.log('App', 'refusing delete of Quick Inbox');
+      return;
+    }
     const success = await deleteNote(id);
     if (success) {
       overlay.forgetNote(id);
@@ -268,7 +285,7 @@ export default function App() {
         setActiveNoteId(null);
       }
     }
-  }, [deleteNote, overlay, activeNoteId]);
+  }, [deleteNote, overlay, activeNoteId, notes]);
 
   const handleFilterChange = useCallback((f) => {
     setFilter(f);
@@ -384,6 +401,7 @@ export default function App() {
         filter={filter}
         onFilterChange={handleFilterChange}
         onListen={triggerCapture}
+        onOpenNote={handleOpenNote}
         onOpenSettings={() => setShowSettings(true)}
         status={status}
         capturing={capturing}

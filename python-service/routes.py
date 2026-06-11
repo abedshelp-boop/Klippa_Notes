@@ -7,10 +7,12 @@ from fastapi.responses import Response
 from openai import APIError as OpenAIAPIError
 
 import ai_client
+import context_state
 import database as db
 import language as language_state
-import tts_kokoro
+import quick_inbox
 import target as target_state
+import tts_kokoro
 from debug import debug
 from wake_word import get_wake_word_state
 
@@ -51,6 +53,9 @@ async def broadcast(message: dict):
 @app.on_event("startup")
 async def startup():
     await db.init_db()
+    # Quick Inbox singleton — must exist before the first capture so voice
+    # routing always has a fallback id. Idempotent.
+    await quick_inbox.ensure_quick_inbox()
 
 
 @app.websocket("/ws")
@@ -138,6 +143,15 @@ async def get_note(note_id: str):
 @app.delete("/notes/{note_id}")
 async def delete_note(note_id: str):
     success = await db.delete_note(note_id)
+    if not success:
+        # Could be "not found" OR "protected (Quick Inbox)". Disambiguate so
+        # the renderer can show a meaningful error toast.
+        inbox = await db.get_quick_inbox()
+        if inbox and inbox["id"] == note_id:
+            raise HTTPException(
+                status_code=409,
+                detail="Quick Inbox cannot be deleted",
+            )
     return {"success": success}
 
 
@@ -459,6 +473,37 @@ async def set_target(body: dict):
     payload = await _target_payload()
     await broadcast(payload)
     return payload
+
+
+@app.get("/context")
+async def get_context_route():
+    """Return the current Electron context (foreground + open-note id).
+
+    Voice routing uses this to decide where a no-qualifier "Hey Deen, [content]"
+    capture lands: if Deen Notes is foregrounded with a note open, route there
+    instead of Quick Inbox.
+    """
+    return context_state.get_context()
+
+
+@app.post("/context")
+async def set_context_route(body: dict):
+    """Electron pushes here on every focus / open-note change.
+
+    Body: {"foreground": bool, "open_note_id": str | null}
+    """
+    context_state.set_context(
+        foreground=bool(body.get("foreground", False)),
+        open_note_id=body.get("open_note_id"),
+    )
+    return context_state.get_context()
+
+
+@app.get("/quick-inbox")
+async def get_quick_inbox_route():
+    """Return the Quick Inbox note row (id, title, etc.). Used by the
+    picker (sticky top entry) and the renderer's sidebar pinning."""
+    return await quick_inbox.ensure_quick_inbox()
 
 
 @app.get("/language")

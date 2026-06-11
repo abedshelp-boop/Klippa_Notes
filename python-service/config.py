@@ -111,6 +111,9 @@ DATA_DIR.mkdir(parents=True, exist_ok=True)
 
 # DB filename kept as klippa.db to preserve existing notes from before the rename.
 # Don't change this without writing a migration.
-DB_PATH = DATA_DIR / "klippa.db"
+# DEEN_NOTES_DB_OVERRIDE: tests set this to point at a tmpdir so they don't
+# trash the real klippa.db. Production launches leave it unset.
+_db_override = os.getenv("DEEN_NOTES_DB_OVERRIDE", "").strip()
+DB_PATH = Path(_db_override) if _db_override else (DATA_DIR / "klippa.db")
 PENDING_DIR = DATA_DIR / "pending"
 PENDING_DIR.mkdir(exist_ok=True)
