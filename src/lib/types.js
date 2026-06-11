@@ -110,7 +110,12 @@
  *
  * @typedef {Object} NoteCard
  * @property {string} id - From `noteCardId()`.
- * @property {number} noteId - Foreign key into the notes table.
+ * @property {string | number} noteId - Foreign key into the notes table.
+ *   The current SQLite-backed implementation stores notes with UUID string PKs
+ *   (`str(uuid.uuid4())`), so most consumers will see a string here. The union
+ *   keeps the door open for the numeric-id world the serialization doc example
+ *   (`docs/superpowers/decisions/2026-05-24-canvas-state-serialization.md`)
+ *   imagined. JSDoc-only widening — no schema change.
  * @property {CanvasPosition} position
  * @property {CanvasSize} size
  * @property {number} rotation
